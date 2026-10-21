@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Surface colors */
+  --surface-bg: #f8fafc;        /* slate-50 */
+  --surface-ground: #f8fafc;    /* slate-50 */
+  --surface-card: #ffffff;      /* white */
+  --surface-raised: #f1f5f9;    /* slate-100 */
+  --surface-hover: #f1f5f9;
+  --surface-input: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-sidebar: #0f172a;   /* slate-900 */
+  --surface-sidebar-hover: #1e293b;
+
+  /* Borders & Dividers */
+  --border-subtle: #e2e8f0;     /* slate-200 */
+  --border-strong: #cbd5e1;     /* slate-300 */
+  --border-focus: #0d9488;      /* teal-600 */
+
+  /* Text & Foreground */
+  --text-primary: #0f172a;      /* slate-900 */
+  --text-secondary: #475569;    /* slate-600 */
+  --text-muted: #64748b;        /* slate-500 */
+  --text-inverted: #f8fafc;     /* slate-50 */
+
+  /* Brand / Accent: Teal */
+  --accent-teal: #0d9488;       /* teal-600 */
+  --accent-teal-subtle: #ccfbf1;/* teal-100 */
+  --accent-teal-hover: #0f766e; /* teal-700 */
+  --accent-teal-fg: #ffffff;
+
+  /* Status Tokens */
+  /* Warning: Amber */
+  --status-warning: #f59e0b;    /* amber-500 */
+  --status-warning-bg: #fef3c7; /* amber-100 */
+  --status-warning-text: #92400e;/* amber-800 */
+  --status-warning-border: #fde68a;
+
+  /* Danger / Expired: Red */
+  --status-danger: #ef4444;     /* red-500 */
+  --status-danger-bg: #fee2e2;  /* red-100 */
+  --status-danger-text: #991b1b;/* red-800 */
+  --status-danger-border: #fecaca;
+
+  /* Success: Green */
+  --status-success: #10b981;    /* emerald-500 */
+  --status-success-bg: #d1fae5; /* emerald-100 */
+  --status-success-text: #065f46;/* emerald-800 */
+  --status-success-border: #a7f3d0;
+
+  /* Info / Unscheduled: Slate/Blue */
+  --status-info: #3b82f6;       /* blue-500 */
+  --status-info-bg: #e0f2fe;    /* sky-100 */
+  --status-info-text: #075985;  /* sky-800 */
+  --status-info-border: #bae6fd;
+
+  --status-neutral: #64748b;
+  --status-neutral-bg: #f1f5f9;
+  --status-neutral-text: #334155;
+  --status-neutral-border: #e2e8f0;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+.dark {
+  /* Surface colors */
+  --surface-bg: #090d16;        /* deep obsidian */
+  --surface-ground: #090d16;    /* deep obsidian */
+  --surface-card: #0f172a;      /* slate-900 */
+  --surface-raised: #1e293b;    /* slate-800 */
+  --surface-hover: #1e293b;
+  --surface-input: #0f172a;
+  --surface-overlay: #1e293b;
+  --surface-sidebar: #050811;
+  --surface-sidebar-hover: #0f172a;
+
+  /* Borders & Dividers */
+  --border-subtle: #1e293b;     /* slate-800 */
+  --border-strong: #334155;     /* slate-700 */
+  --border-focus: #14b8a6;      /* teal-500 */
+
+  /* Text & Foreground */
+  --text-primary: #f8fafc;      /* slate-50 */
+  --text-secondary: #cbd5e1;    /* slate-300 */
+  --text-muted: #94a3b8;        /* slate-400 */
+  --text-inverted: #0f172a;     /* slate-900 */
+
+  /* Brand / Accent: Teal */
+  --accent-teal: #14b8a6;       /* teal-500 */
+  --accent-teal-subtle: #134e4a;/* teal-900 */
+  --accent-teal-hover: #2dd4bf; /* teal-400 */
+  --accent-teal-fg: #042f2e;
+
+  /* Status Tokens */
+  /* Warning: Amber */
+  --status-warning: #fbbf24;    /* amber-400 */
+  --status-warning-bg: #451a03; /* amber-950 */
+  --status-warning-text: #fde68a;/* amber-200 */
+  --status-warning-border: #78350f;
+
+  /* Danger / Expired: Red */
+  --status-danger: #f87171;     /* red-400 */
+  --status-danger-bg: #450a0a;  /* red-950 */
+  --status-danger-text: #fecaca;/* red-200 */
+  --status-danger-border: #7f1d1d;
+
+  /* Success: Green */
+  --status-success: #34d399;    /* emerald-400 */
+  --status-success-bg: #064e3b; /* emerald-950 */
+  --status-success-text: #a7f3d0;/* emerald-200 */
+  --status-success-border: #065f46;
+
+  /* Info / Unscheduled */
+  --status-info: #60a5fa;       /* blue-400 */
+  --status-info-bg: #082f49;    /* sky-950 */
+  --status-info-text: #bae6fd;  /* sky-200 */
+  --status-info-border: #0c4a6e;
+
+  --status-neutral: #94a3b8;
+  --status-neutral-bg: #1e293b;
+  --status-neutral-text: #e2e8f0;
+  --status-neutral-border: #334155;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.6);
+}
+
+body {
+  background-color: var(--surface-bg);
+  color: var(--text-primary);
+  font-family: var(--font-ibm-plex-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Hide Next.js dev badge overlay so it never obscures page actions / bottom content */
+nextjs-portal,
+[data-nextjs-toast-wrapper],
+[data-nextjs-dialog-overlay] {
+  pointer-events: none;
+}
+nextjs-portal div:has(> svg[aria-label="Next.js logo"]),
+nextjs-portal [data-nextjs-dev-tools-indicator] {
+  display: none !important;
+}
