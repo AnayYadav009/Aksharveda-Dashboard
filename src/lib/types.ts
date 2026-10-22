@@ -217,7 +217,7 @@ export interface InAppNotification {
   created_at: string;
 }
 
-export type UserRole = "demand" | "warehouse" | "management";
+export type UserRole = "pending" | "demand" | "warehouse" | "management";
 
 export interface UserProfile {
   user_id: string;

@@ -27,10 +27,47 @@ describe("Phase 3 Security & Access Control Suite", () => {
       expect(isActionAuthorized("management", "manage")).toBe(true);
     });
 
-    it("allows all authenticated roles to read data", () => {
+    it("allows all authenticated roles to read data, but strictly denies pending", () => {
       expect(isActionAuthorized("demand", "read")).toBe(true);
       expect(isActionAuthorized("warehouse", "read")).toBe(true);
       expect(isActionAuthorized("management", "read")).toBe(true);
+      expect(isActionAuthorized("pending", "read")).toBe(false);
+    });
+
+    it("strictly denies pending role any permission or action", () => {
+      expect(isActionAuthorized("pending", "upload")).toBe(false);
+      expect(isActionAuthorized("pending", "planning_edit")).toBe(false);
+      expect(isActionAuthorized("pending", "stock_edit")).toBe(false);
+      expect(isActionAuthorized("pending", "manage")).toBe(false);
+      expect(isActionAuthorized("pending", "read")).toBe(false);
+    });
+  });
+
+  describe("API Protection for Pending Role", () => {
+    it("blocks pending user from /api/pos with 403 Forbidden", async () => {
+      const { GET } = await import("../src/app/api/pos/route");
+      const req = {
+        nextUrl: new URL("http://localhost:3000/api/pos"),
+        headers: new Headers({ "x-test-role": "pending" }),
+      } as any;
+
+      const res = await GET(req);
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error).toContain("Forbidden");
+    });
+
+    it("allows demand, warehouse, and management users to access /api/pos", async () => {
+      const { GET } = await import("../src/app/api/pos/route");
+      for (const role of ["demand", "warehouse", "management"]) {
+        const req = {
+          nextUrl: new URL("http://localhost:3000/api/pos"),
+          headers: new Headers({ "x-test-role": role }),
+        } as any;
+
+        const res = await GET(req);
+        expect(res.status).toBe(200);
+      }
     });
   });
 
@@ -54,3 +91,4 @@ describe("Phase 3 Security & Access Control Suite", () => {
     });
   });
 });
+

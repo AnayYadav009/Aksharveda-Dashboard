@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDashboardData } from "@/lib/data-layer";
+import { getDashboardData } from "../../../lib/data-layer";
+import { authenticateApiRequest } from "../../../lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const authResult = await authenticateApiRequest(req);
+    if (authResult instanceof NextResponse) {
+      return authResult;
+    }
+
     const searchParams = req.nextUrl.searchParams;
     const view = searchParams.get("view") || "month";
     const month = searchParams.get("month");

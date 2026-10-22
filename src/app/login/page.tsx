@@ -31,7 +31,18 @@ export default function LoginPage() {
       }
 
       if (data.session) {
-        router.push('/pos');
+        // Check profile role
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('user_id', data.user.id)
+          .single();
+
+        if (profile?.role === 'pending') {
+          router.push('/pending');
+        } else {
+          router.push('/pos');
+        }
         router.refresh();
       }
     } catch (err: unknown) {
@@ -108,7 +119,13 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="pt-4 border-t border-[var(--border-subtle)] text-center">
+        <div className="pt-4 border-t border-[var(--border-subtle)] flex flex-col items-center gap-2 text-center">
+          <p className="text-xs text-[var(--text-muted)]">
+            Need an account?{' '}
+            <a href="/signup" className="text-teal-400 hover:text-teal-300 font-medium">
+              Request access
+            </a>
+          </p>
           <p className="text-[11px] text-[var(--text-muted)] font-mono">
             Role-Based Access: Demand, Warehouse, Management
           </p>
