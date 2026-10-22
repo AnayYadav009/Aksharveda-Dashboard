@@ -167,6 +167,7 @@ export interface SKUMaster {
 }
 
 export interface StockSnapshot {
+  hub: Hub;
   item_id: string;
   qty_in_hand: number;
   updated_at: string;

@@ -108,8 +108,14 @@ async function mustUpsert<T extends Record<string, unknown>>(
 /**
  * Helper to fetch all rows across PostgREST's 1000-row pagination limit.
  */
-async function fetchAllRows<T>(table: string, columns = "*", orderBy?: { column: string; ascending: boolean }): Promise<T[]> {
-  const cacheKey = `table:${table}:${columns}:${orderBy ? `${orderBy.column}-${orderBy.ascending}` : 'none'}`;
+async function fetchAllRows<T>(
+  table: string,
+  columns = "*",
+  orderBy?: { column: string; ascending: boolean },
+  filters: Array<{ column: string; value: unknown }> = []
+): Promise<T[]> {
+  const filterKey = filters.map(({ column, value }) => `${column}-${String(value)}`).join(",");
+  const cacheKey = `table:${table}:${columns}:${orderBy ? `${orderBy.column}-${orderBy.ascending}` : 'none'}:${filterKey}`;
   const cached = queryCache.get(cacheKey) as CacheEntry<T[]> | undefined;
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
     return cached.data;
@@ -124,10 +130,14 @@ async function fetchAllRows<T>(table: string, columns = "*", orderBy?: { column:
   let hasMore = true;
 
   while (hasMore) {
-    let query = supabase.from(table).select(columns).range(from, from + pageSize - 1);
+    let query = supabase.from(table).select(columns);
+    for (const filter of filters) {
+      query = query.eq(filter.column, filter.value);
+    }
     if (orderBy) {
       query = query.order(orderBy.column, { ascending: orderBy.ascending });
     }
+    query = query.range(from, from + pageSize - 1);
     const { data, error } = await query;
     if (error) {
       console.error(`Error fetching from ${table}:`, error.message);
@@ -152,7 +162,7 @@ async function fetchAllRows<T>(table: string, columns = "*", orderBy?: { column:
  * 1. DASHBOARD: Fetch POs and Top Summary
  */
 export async function getDashboardData(options: {
-  hub?: Hub;
+  hub: Hub;
   view?: string;
   month?: string | null;
   days?: number;
@@ -182,7 +192,7 @@ export async function getDashboardData(options: {
   let nearExpiryDays = 7;
 
   if (!status.isFallback) {
-    headers = await fetchAllRows<POHeader>("po_header");
+    headers = await fetchAllRows<POHeader>("po_header", "*", undefined, [{ column: "hub", value: hub }]);
     // Get settings
     const supabase = getSupabaseClient()!;
     const { data: setRow } = await supabase.from("settings").select("value").eq("key", "near_expiry_days").maybeSingle();
@@ -196,9 +206,7 @@ export async function getDashboardData(options: {
   }
 
   // Filter by hub
-  if (hub) {
-    headers = headers.filter((h) => h.hub === hub);
-  }
+  headers = headers.filter((h) => h.hub === hub);
 
   // Filter by search, city, state
   if (search) {
@@ -303,22 +311,20 @@ export async function getDashboardData(options: {
 /**
  * 2. PO DETAIL: Fetch single PO drawer info
  */
-export async function getPODetail(poNumber: string, hub?: Hub) {
+export async function getPODetail(poNumber: string, hub: Hub) {
   const status = await getDataAdapterStatus();
 
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
-    let headerQuery = supabase.from("po_header").select("*").eq("po_number", poNumber);
-    let linesQuery = supabase.from("po_line").select("*").eq("po_number", poNumber);
-    let planQuery = supabase.from("po_plan").select("*").eq("po_number", poNumber);
-    let histQuery = supabase.from("po_state_history").select("*").eq("po_number", poNumber).order("changed_at", { ascending: false });
+    let headerQuery = supabase.from("po_header").select("*").eq("channel_id", "blinkit").eq("po_number", poNumber);
+    let linesQuery = supabase.from("po_line").select("*").eq("channel_id", "blinkit").eq("po_number", poNumber);
+    let planQuery = supabase.from("po_plan").select("*").eq("channel_id", "blinkit").eq("po_number", poNumber);
+    let histQuery = supabase.from("po_state_history").select("*").eq("channel_id", "blinkit").eq("po_number", poNumber).order("changed_at", { ascending: false });
 
-    if (hub) {
-      headerQuery = headerQuery.eq("hub", hub);
-      linesQuery = linesQuery.eq("hub", hub);
-      planQuery = planQuery.eq("hub", hub);
-      histQuery = histQuery.eq("hub", hub);
-    }
+    headerQuery = headerQuery.eq("hub", hub);
+    linesQuery = linesQuery.eq("hub", hub);
+    planQuery = planQuery.eq("hub", hub);
+    histQuery = histQuery.eq("hub", hub);
 
     const [headerRes, linesRes, skusList, planRes, histRes] = await Promise.all([
       headerQuery.maybeSingle(),
@@ -353,13 +359,13 @@ export async function getPODetail(poNumber: string, hub?: Hub) {
     };
   } else {
     const store = loadStore();
-    const header = store.po_header.find((h) => h.po_number === poNumber && (hub ? h.hub === hub : true));
+    const header = store.po_header.find((h) => h.channel_id === "blinkit" && h.po_number === poNumber && h.hub === hub);
     if (!header) return null;
 
     const targetHub = header.hub;
 
     const lines = store.po_line
-      .filter((l) => l.po_number === poNumber && l.hub === targetHub)
+      .filter((l) => l.channel_id === "blinkit" && l.po_number === poNumber && l.hub === targetHub)
       .map((l) => {
         const sku = store.sku_master.find((s) => s.item_id === l.item_id);
         return {
@@ -371,9 +377,9 @@ export async function getPODetail(poNumber: string, hub?: Hub) {
         };
       });
 
-    const plan = store.po_plan.find((p) => p.po_number === poNumber && p.hub === targetHub) || null;
+    const plan = store.po_plan.find((p) => p.channel_id === "blinkit" && p.po_number === poNumber && p.hub === targetHub) || null;
     const stateHistory = store.po_state_history
-      .filter((h) => h.po_number === poNumber && h.hub === targetHub)
+      .filter((h) => h.channel_id === "blinkit" && h.po_number === poNumber && h.hub === targetHub)
       .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
 
     return { header, lines, plan, stateHistory, state_history: stateHistory };
@@ -383,7 +389,7 @@ export async function getPODetail(poNumber: string, hub?: Hub) {
 /**
  * 3. PLANNING SHEET: Fetch Matrix Data
  */
-export async function getPlanningGrid(options: { hideClosed: boolean; city?: string; state?: string; hub?: Hub }) {
+export async function getPlanningGrid(options: { hideClosed: boolean; city?: string; state?: string; hub: Hub }) {
   const status = await getDataAdapterStatus();
   let headers: POHeader[] = [];
   let lines: POLine[] = [];
@@ -394,12 +400,12 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
 
   if (!status.isFallback) {
     const [hList, lList, sList, stockList, pList, dList] = await Promise.all([
-      fetchAllRows<POHeader>("po_header"),
-      fetchAllRows<POLine>("po_line"),
+      fetchAllRows<POHeader>("po_header", "*", undefined, [{ column: "hub", value: options.hub }]),
+      fetchAllRows<POLine>("po_line", "*", undefined, [{ column: "hub", value: options.hub }]),
       fetchAllRows<SKUMaster>("sku_master"),
-      fetchAllRows<StockSnapshot>("stock_snapshot"),
-      fetchAllRows<POPlan>("po_plan"),
-      fetchAllRows<POLineDispatch>("po_line_dispatch"),
+      fetchAllRows<StockSnapshot>("stock_snapshot", "*", undefined, [{ column: "hub", value: options.hub }]),
+      fetchAllRows<POPlan>("po_plan", "*", undefined, [{ column: "hub", value: options.hub }]),
+      fetchAllRows<POLineDispatch>("po_line_dispatch", "*", undefined, [{ column: "hub", value: options.hub }]),
     ]);
     headers = hList;
     lines = lList;
@@ -418,12 +424,11 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
   }
 
   // Filter by hub
-  if (options.hub) {
-    headers = headers.filter((h) => h.hub === options.hub);
-    lines = lines.filter((l) => l.hub === options.hub);
-    plans = plans.filter((p) => p.hub === options.hub);
-    dispatches = dispatches.filter((d) => d.hub === options.hub);
-  }
+  headers = headers.filter((h) => h.hub === options.hub);
+  lines = lines.filter((l) => l.hub === options.hub);
+  plans = plans.filter((p) => p.hub === options.hub);
+  dispatches = dispatches.filter((d) => d.hub === options.hub);
+  stockSnapshot = stockSnapshot.filter((s) => s.hub === options.hub);
 
   // Filter headers
   if (options.hideClosed) {
@@ -531,7 +536,7 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
  */
 export async function updatePlanningRow(body: {
   po_number: string;
-  hub?: Hub;
+  hub: Hub;
   remarks?: string;
   central_appointment_date?: string | null;
   internal_dispatch_date?: string | null;
@@ -549,16 +554,10 @@ export async function updatePlanningRow(body: {
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
 
-    // Resolve hub from po_header if not provided
-    let targetHub: Hub = body.hub || "delhi";
-    if (!body.hub) {
-      const { data: h } = await supabase.from("po_header").select("hub").eq("po_number", po_number).maybeSingle();
-      if (h?.hub) targetHub = h.hub as Hub;
-    }
+    const targetHub = body.hub;
 
     // 1. Upsert po_plan
-    let planQuery = supabase.from("po_plan").select("*").eq("po_number", po_number);
-    if (targetHub) planQuery = planQuery.eq("hub", targetHub);
+    const planQuery = supabase.from("po_plan").select("*").eq("channel_id", "blinkit").eq("hub", targetHub).eq("po_number", po_number);
     const { data: existingPlan } = await planQuery.maybeSingle();
 
     const planPayload: POPlan = {
@@ -579,8 +578,7 @@ export async function updatePlanningRow(body: {
       let targetItemId = item_id;
       if (!targetItemId) {
         // Find first line item for this PO
-        let lineQuery = supabase.from("po_line").select("item_id").eq("po_number", po_number);
-        if (targetHub) lineQuery = lineQuery.eq("hub", targetHub);
+        const lineQuery = supabase.from("po_line").select("item_id").eq("channel_id", "blinkit").eq("hub", targetHub).eq("po_number", po_number);
         const { data: lineRow } = await lineQuery.limit(1).maybeSingle();
         targetItemId = lineRow?.item_id;
       }
@@ -639,7 +637,7 @@ export async function updatePlanningRow(body: {
     return { success: true, plan: planPayload };
   } else {
     const store = loadStore();
-    const resolvedHub = body.hub || store.po_header.find((h) => h.po_number === po_number)?.hub || "delhi";
+    const resolvedHub = body.hub;
     let plan = store.po_plan.find((p) => p.po_number === po_number && p.hub === resolvedHub);
     if (!plan) {
       plan = {
@@ -703,8 +701,10 @@ export async function generateUploadPreview(
   let nearExpiryDays = 7;
 
   if (!status.isFallback) {
-    existingHeaders = await fetchAllRows<POHeader>("po_header");
-    existingLines = await fetchAllRows<POLine>("po_line");
+    const hub = cleanedRows[0]?.hub;
+    if (!hub) throw new Error("hub is required for upload preview");
+    existingHeaders = await fetchAllRows<POHeader>("po_header", "*", undefined, [{ column: "hub", value: hub }]);
+    existingLines = await fetchAllRows<POLine>("po_line", "*", undefined, [{ column: "hub", value: hub }]);
   } else {
     const store = loadStore();
     existingHeaders = [...store.po_header];
@@ -871,9 +871,10 @@ export async function commitUploadTransaction(
     });
     const poNumbers = poEntries.map((e) => e.po_number);
     const hubs = Array.from(new Set(poEntries.map((e) => e.hub)));
+    const channels = Array.from(new Set(poEntries.map((e) => e.channel_id)));
 
-    const { data: backupHeaders } = await supabase.from("po_header").select("*").in("po_number", poNumbers).in("hub", hubs);
-    const { data: backupLines } = await supabase.from("po_line").select("*").in("po_number", poNumbers).in("hub", hubs);
+    const { data: backupHeaders } = await supabase.from("po_header").select("*").in("channel_id", channels).in("po_number", poNumbers).in("hub", hubs);
+    const { data: backupLines } = await supabase.from("po_line").select("*").in("channel_id", channels).in("po_number", poNumbers).in("hub", hubs);
 
     try {
       // 1. Insert upload_log entry
@@ -1113,9 +1114,9 @@ export async function commitUploadTransaction(
         .map((k) => k.split(":")[2]);
 
       if (newPoNumbers.length > 0) {
-        await supabase.from("po_line").delete().in("po_number", newPoNumbers).in("hub", hubs);
-        await supabase.from("po_plan").delete().in("po_number", newPoNumbers).in("hub", hubs);
-        await supabase.from("po_header").delete().in("po_number", newPoNumbers).in("hub", hubs);
+        await supabase.from("po_line").delete().in("channel_id", channels).in("po_number", newPoNumbers).in("hub", hubs);
+        await supabase.from("po_plan").delete().in("channel_id", channels).in("po_number", newPoNumbers).in("hub", hubs);
+        await supabase.from("po_header").delete().in("channel_id", channels).in("po_number", newPoNumbers).in("hub", hubs);
       }
 
       // 2. Restore previous headers
@@ -1337,41 +1338,43 @@ async function commitUploadFallback(
 /**
  * 7. STOCK SNAPSHOT OPERATIONS
  */
-export async function getStockData(): Promise<StockSnapshot[]> {
+export async function getStockData(hub: Hub): Promise<StockSnapshot[]> {
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
-    return fetchAllRows<StockSnapshot>("stock_snapshot");
+    return fetchAllRows<StockSnapshot>("stock_snapshot", "*", undefined, [{ column: "hub", value: hub }]);
   } else {
-    return loadStore().stock_snapshot;
+    return loadStore().stock_snapshot.filter((row) => row.hub === hub);
   }
 }
 
-export async function updateStockData(updates: Array<{ item_id: string; qty_in_hand: number }>, updatedBy = "ops_team") {
+export async function updateStockData(updates: Array<{ item_id: string; qty_in_hand: number }>, hub: Hub, updatedBy = "ops_team") {
   const status = await getDataAdapterStatus();
   const nowIso = new Date().toISOString();
 
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
     const payload = updates.map((u) => ({
+      hub,
       item_id: u.item_id,
       qty_in_hand: Number(u.qty_in_hand) || 0,
       updated_at: nowIso,
       updated_by: updatedBy,
     }));
-    const { error } = await supabase.from("stock_snapshot").upsert(payload, { onConflict: "item_id" });
+    const { error } = await supabase.from("stock_snapshot").upsert(payload, { onConflict: "hub,item_id" });
     if (error) throw error;
     invalidateDataCache("table:stock_snapshot");
     return { success: true, count: updates.length };
   } else {
     const store = loadStore();
     updates.forEach((u) => {
-      const idx = store.stock_snapshot.findIndex((s) => s.item_id === u.item_id);
+      const idx = store.stock_snapshot.findIndex((s) => s.hub === hub && s.item_id === u.item_id);
       const qty = Number(u.qty_in_hand) || 0;
       if (idx >= 0) {
         store.stock_snapshot[idx].qty_in_hand = qty;
         store.stock_snapshot[idx].updated_at = nowIso;
       } else {
         store.stock_snapshot.push({
+          hub,
           item_id: u.item_id,
           qty_in_hand: qty,
           updated_at: nowIso,
@@ -1485,10 +1488,10 @@ export async function markNotificationsRead() {
 /**
  * 9. UPLOAD LOGS
  */
-export async function getUploadLogs(hub?: Hub): Promise<UploadLog[]> {
+export async function getUploadLogs(hub: Hub): Promise<UploadLog[]> {
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
-    const data = await fetchAllRows<any>("upload_log", "*", { column: "uploaded_at", ascending: false });
+    const data = await fetchAllRows<any>("upload_log", "*", { column: "uploaded_at", ascending: false }, [{ column: "hub", value: hub }]);
     const mapped: UploadLog[] = (data || []).map((d) => ({
       id: d.id,
       channel_id: d.channel_id,
@@ -1506,10 +1509,10 @@ export async function getUploadLogs(hub?: Hub): Promise<UploadLog[]> {
       total_units: d.total_units || d.error_report?.total_units || 0,
       total_amount: d.total_amount || d.error_report?.total_amount || 0,
     }));
-    return hub ? mapped.filter((m) => m.hub === hub) : mapped;
+    return mapped;
   } else {
     const logs = loadStore().upload_log;
-    return hub ? logs.filter((l) => l.hub === hub) : logs;
+    return logs.filter((l) => l.hub === hub);
   }
 }
 
@@ -1539,7 +1542,7 @@ export async function updateSKUShortName(itemId: string, shortName: string) {
 /**
  * 11. E2E TEST PO ISOLATION (Guarantees zero mutation to live PO rows)
  */
-export async function upsertTestPO(poNumber: string, hub: Hub = "delhi") {
+export async function upsertTestPO(poNumber: string, hub: Hub) {
   if (!poNumber.startsWith("TEST-E2E-")) {
     throw new Error("Invalid test PO number: must start with TEST-E2E-");
   }
@@ -1622,24 +1625,17 @@ export async function upsertTestPO(poNumber: string, hub: Hub = "delhi") {
   }
 }
 
-export async function deleteTestPO(poNumber: string, hub?: Hub) {
+export async function deleteTestPO(poNumber: string, hub: Hub) {
   if (!poNumber.startsWith("TEST-E2E-")) {
     throw new Error("Invalid test PO number: must start with TEST-E2E-");
   }
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
-    let planDel = supabase.from("po_plan").delete().eq("po_number", poNumber);
-    let dispDel = supabase.from("po_line_dispatch").delete().eq("po_number", poNumber);
-    let lineDel = supabase.from("po_line").delete().eq("po_number", poNumber);
-    let headDel = supabase.from("po_header").delete().eq("po_number", poNumber);
-
-    if (hub) {
-      planDel = planDel.eq("hub", hub);
-      dispDel = dispDel.eq("hub", hub);
-      lineDel = lineDel.eq("hub", hub);
-      headDel = headDel.eq("hub", hub);
-    }
+    const planDel = supabase.from("po_plan").delete().eq("channel_id", "blinkit").eq("po_number", poNumber).eq("hub", hub);
+    const dispDel = supabase.from("po_line_dispatch").delete().eq("channel_id", "blinkit").eq("po_number", poNumber).eq("hub", hub);
+    const lineDel = supabase.from("po_line").delete().eq("channel_id", "blinkit").eq("po_number", poNumber).eq("hub", hub);
+    const headDel = supabase.from("po_header").delete().eq("channel_id", "blinkit").eq("po_number", poNumber).eq("hub", hub);
 
     await planDel;
     await dispDel;
@@ -1654,10 +1650,10 @@ export async function deleteTestPO(poNumber: string, hub?: Hub) {
     return { success: true, po_number: poNumber, deleted: true };
   } else {
     const store = loadStore();
-    store.po_header = store.po_header.filter((p) => p.po_number !== poNumber || (hub && p.hub !== hub));
-    store.po_line = store.po_line.filter((l) => l.po_number !== poNumber || (hub && l.hub !== hub));
-    store.po_plan = store.po_plan.filter((p) => p.po_number !== poNumber || (hub && p.hub !== hub));
-    store.po_line_dispatch = store.po_line_dispatch.filter((d) => d.po_number !== poNumber || (hub && d.hub !== hub));
+    store.po_header = store.po_header.filter((p) => p.po_number !== poNumber || p.hub !== hub);
+    store.po_line = store.po_line.filter((l) => l.po_number !== poNumber || l.hub !== hub);
+    store.po_plan = store.po_plan.filter((p) => p.po_number !== poNumber || p.hub !== hub);
+    store.po_line_dispatch = store.po_line_dispatch.filter((d) => d.po_number !== poNumber || d.hub !== hub);
     saveStore(store);
     invalidateDataCache("table:po_header");
     invalidateDataCache("table:po_line");

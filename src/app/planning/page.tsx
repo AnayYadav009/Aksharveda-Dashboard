@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -87,6 +87,14 @@ function PlanningContent() {
   const searchParams = useSearchParams();
   const rawHub = searchParams.get('hub');
   const hub: Hub = rawHub === 'kolkata' ? 'kolkata' : 'delhi';
+
+  useEffect(() => {
+    if (!rawHub) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('hub', hub);
+      router.replace(`/planning?${params.toString()}`, { scroll: false });
+    }
+  }, [rawHub, hub, router, searchParams]);
 
   const queryClient = useQueryClient();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -523,7 +531,7 @@ function PlanningContent() {
       </div>
 
       {/* 3. Sticky Summary Strip */}
-      <div className="sticky top-16 z-20 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)]/95 backdrop-blur-md shadow-xs text-xs">
+      <div className="sticky top-16 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] backdrop-blur-md shadow-xs text-xs" style={{ zIndex: "var(--z-topbar)" }}>
         <div className="flex flex-wrap items-center gap-3 sm:gap-4">
           <span className="font-semibold text-[var(--text-primary)]">
             Active Grid Scope:
@@ -596,14 +604,14 @@ function PlanningContent() {
         >
           <table className="w-full border-collapse text-xs text-left">
             {/* FROZEN HEADERS */}
-            <thead className="sticky top-0 z-30 bg-[var(--surface-card)] shadow-xs">
+            <thead className="sticky top-0 bg-[var(--surface-card)] shadow-xs" style={{ zIndex: "var(--z-table-sticky)" }}>
               {/* Row 1: Fixed Column Headers + Rotated SKU Names */}
               <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]">
                 {/* Frozen Left Columns */}
-                <th className="sticky left-0 z-40 bg-[var(--surface-raised)] p-2.5 w-32 min-w-[128px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-subtle)]">
+                <th className="sticky left-0 p-2.5 w-32 min-w-[128px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   PO Number
                 </th>
-                <th className="sticky left-32 z-40 bg-[var(--surface-raised)] p-2.5 w-40 min-w-[160px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-subtle)]">
+                <th className="sticky left-32 p-2.5 w-40 min-w-[160px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Store / City
                 </th>
                 <th className="p-2.5 w-24 min-w-[96px] text-center font-semibold text-[var(--text-primary)]">
@@ -626,7 +634,7 @@ function PlanningContent() {
                     className="p-1.5 w-20 min-w-[80px] max-w-[80px] text-center border-r border-[var(--border-subtle)] align-bottom group relative"
                     title={`${sku.name}\nSKU ID: ${sku.item_id}\nClick to edit display short name`}
                   >
-                    <div className="h-20 flex flex-col items-center justify-end pb-1 overflow-hidden">
+                    <div className="h-24 flex flex-col items-center justify-end pb-1 overflow-hidden">
                       <span className="transform -rotate-45 block whitespace-nowrap text-[10px] font-semibold text-[var(--text-secondary)] truncate w-20 cursor-help">
                         {sku.short_name || sku.name}
                       </span>
@@ -645,10 +653,10 @@ function PlanningContent() {
 
               {/* Row 2: Stock in Hand (Editable per SKU) */}
               <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-card)]">
-                <th className="sticky left-0 z-40 bg-[var(--surface-card)] p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-subtle)]">
+                <th className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Stock in Hand
                 </th>
-                <td className="sticky left-32 z-40 bg-[var(--surface-card)] p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-subtle)]">
+                <td className="sticky left-32 p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Editable per SKU
                 </td>
                 <td colSpan={4} className="border-r border-[var(--border-subtle)] bg-[var(--surface-card)]" />
@@ -674,10 +682,10 @@ function PlanningContent() {
 
               {/* Row 3: Open Orders */}
               <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-card)]">
-                <th className="sticky left-0 z-40 bg-[var(--surface-card)] p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-subtle)]">
+                <th className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Open Orders
                 </th>
-                <td className="sticky left-32 z-40 bg-[var(--surface-card)] p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-subtle)]">
+                <td className="sticky left-32 p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Sum of active lines
                 </td>
                 <td colSpan={4} className="border-r border-[var(--border-subtle)] bg-[var(--surface-card)]" />
@@ -695,10 +703,10 @@ function PlanningContent() {
 
               {/* Row 4: Net Balance (Red when negative, Green when positive, '–' when unknown) */}
               <tr className="border-b-2 border-[var(--border-strong)] bg-[var(--surface-raised)]">
-                <th className="sticky left-0 z-40 bg-[var(--surface-raised)] p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-subtle)]">
+                <th className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Net Balance
                 </th>
-                <td className="sticky left-32 z-40 bg-[var(--surface-raised)] p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-subtle)]">
+                <td className="sticky left-32 p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Stock − Open
                 </td>
                 <td colSpan={4} className="border-r border-[var(--border-subtle)] bg-[var(--surface-raised)]" />
@@ -753,14 +761,14 @@ function PlanningContent() {
                     {/* Frozen Left: PO Number */}
                     <td
                       onClick={() => setSelectedPoNumber(row.po_number)}
-                      className="sticky left-0 z-20 bg-[var(--surface-card)] hover:bg-[var(--surface-hover)] p-2.5 w-32 min-w-[128px] font-mono font-semibold text-[var(--accent-teal)] cursor-pointer truncate border-r border-[var(--border-subtle)]"
+                      className="sticky left-0 p-2.5 w-32 min-w-[128px] font-mono font-semibold text-[var(--accent-teal)] cursor-pointer truncate border-r border-[var(--border-strong)] bg-[var(--surface-card)] hover:bg-[var(--surface-hover)]" style={{ zIndex: "var(--z-table-sticky)" }}
                       title="Click to inspect PO details"
                     >
                       #{row.po_number}
                     </td>
 
                     {/* Frozen Left: Store & City */}
-                    <td className="sticky left-32 z-20 bg-[var(--surface-card)] p-2.5 w-40 min-w-[160px] truncate border-r border-[var(--border-subtle)]">
+                    <td className="sticky left-32 p-2.5 w-40 min-w-[160px] truncate border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky)" }}>
                       <p className="font-semibold text-[var(--text-primary)] truncate" title={row.facility_raw}>
                         {row.facility_raw}
                       </p>

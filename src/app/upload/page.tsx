@@ -98,9 +98,13 @@ export default function UploadWizardPage() {
   const [pastUploads, setPastUploads] = useState<Array<{ file_name: string; uploaded_at: string }>>([]);
   const [isDuplicateFile, setIsDuplicateFile] = useState(false);
 
-  // Fetch past upload names on mount to warn about duplicate file uploads
+  // Fetch prior file names for the selected hub before warning about duplicate uploads
   useEffect(() => {
-    fetch('/api/uploads')
+    if (!selectedHub) {
+      setPastUploads([]);
+      return;
+    }
+    fetch(`/api/uploads?hub=${selectedHub}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.uploads) {
@@ -108,9 +112,9 @@ export default function UploadWizardPage() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [selectedHub]);
 
-  // Download expected column schema sample
+  // Download the expected CSV column headers
   const handleDownloadExpectedColumns = () => {
     const csvContent = EXPECTED_COLUMNS.join(',') + '\n';
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

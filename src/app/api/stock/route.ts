@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const stock = await getStockData();
+    const stock = await getStockData(hubResult.data);
     return NextResponse.json({ stock });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Error fetching stock";
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const actor = updated_by || updatedBy || "warehouse_team";
 
     if (item_id !== undefined && qty_in_hand !== undefined) {
-      await updateStockData([{ item_id, qty_in_hand: Number(qty_in_hand) }], actor);
+      await updateStockData([{ item_id, qty_in_hand: Number(qty_in_hand) }], hubResult.data, actor);
       return NextResponse.json({ success: true });
     }
 
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       const formatted = updates
         .filter((u) => Boolean(u.item_id))
         .map((u) => ({ item_id: u.item_id, qty_in_hand: Number(u.qty_in_hand || u.qty) || 0 }));
-      const result = await updateStockData(formatted, actor);
+      const result = await updateStockData(formatted, hubResult.data, actor);
       return NextResponse.json(result);
     }
 
