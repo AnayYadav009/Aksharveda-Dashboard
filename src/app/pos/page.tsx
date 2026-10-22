@@ -210,8 +210,9 @@ function PODashboardContent() {
       key: 'facility_raw',
       header: 'Facility / Darkstore',
       sortable: true,
+      width: '220px',
       render: (item) => (
-        <div className="max-w-[200px] truncate" title={item.facility_raw}>
+        <div className="min-w-[220px] flex flex-col min-w-0" title={item.facility_raw}>
           <p className="font-medium text-[var(--text-primary)] truncate">{item.facility_raw}</p>
           <p className="text-[10px] text-[var(--text-muted)] font-mono">{item.city} ({item.facility_code || 'FC'})</p>
         </div>
@@ -268,6 +269,7 @@ function PODashboardContent() {
     },
     {
       key: 'total_qty',
+      numeric: true,
       header: 'Units',
       align: 'right',
       sortable: true,
@@ -279,6 +281,7 @@ function PODashboardContent() {
     },
     {
       key: 'total_amount',
+      numeric: true,
       header: 'Total Value',
       align: 'right',
       sortable: true,

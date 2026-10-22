@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   PageHeader,
@@ -11,6 +12,7 @@ import {
   ErrorState,
 } from '@/components/ui';
 import { UploadLog } from '@/lib/types';
+import { Hub } from '@/lib/types';
 import { UploadDetailDrawer } from '@/components/upload/UploadDetailDrawer';
 import { formatINR, formatUnits, formatDate } from '@/lib/format';
 import {
@@ -24,18 +26,35 @@ import {
 } from 'lucide-react';
 
 export default function UploadsHistoryPage() {
+  return (
+    <React.Suspense fallback={<div className="min-h-64" aria-busy="true" />}>
+      <UploadsHistoryContent />
+    </React.Suspense>
+  );
+}
+
+function UploadsHistoryContent() {
   const [selectedUpload, setSelectedUpload] = useState<UploadLog | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const hub: Hub = searchParams.get('hub') === 'kolkata' ? 'kolkata' : 'delhi';
 
   const { data, isLoading, isError, error, refetch } = useQuery<{ uploads: UploadLog[] }>({
-    queryKey: ['uploads-history'],
+    queryKey: ['uploads-history', hub],
     queryFn: async () => {
-      const res = await fetch('/api/uploads');
+      const res = await fetch(`/api/uploads?hub=${hub}`);
       if (!res.ok) throw new Error('Failed to fetch upload logs');
       return res.json();
     },
   });
 
   const uploads = data?.uploads || [];
+
+  const selectHub = (nextHub: Hub) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('hub', nextHub);
+    router.replace(`/uploads?${params.toString()}`);
+  };
 
   const columns: Column<UploadLog>[] = [
     {
@@ -94,6 +113,7 @@ export default function UploadsHistoryPage() {
     },
     {
       key: 'total_units',
+      numeric: true,
       header: 'Units',
       align: 'right',
       sortable: true,
@@ -105,6 +125,7 @@ export default function UploadsHistoryPage() {
     },
     {
       key: 'total_amount',
+      numeric: true,
       header: 'Value (₹)',
       align: 'right',
       sortable: true,
@@ -116,6 +137,7 @@ export default function UploadsHistoryPage() {
     },
     {
       key: 'pos_new',
+      numeric: true,
       header: 'New POs',
       align: 'center',
       sortable: true,
@@ -127,6 +149,7 @@ export default function UploadsHistoryPage() {
     },
     {
       key: 'pos_updated',
+      numeric: true,
       header: 'Updated',
       align: 'center',
       sortable: true,
@@ -201,6 +224,15 @@ export default function UploadsHistoryPage() {
           </Link>
         }
       />
+
+      <div className="flex gap-2" role="tablist" aria-label="Upload history hub">
+        {(['delhi', 'kolkata'] as Hub[]).map((option) => (
+          <button key={option} role="tab" aria-selected={hub === option} onClick={() => selectHub(option)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize ${hub === option ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--surface-raised)] text-[var(--text-secondary)]'}`}>
+            {option}
+          </button>
+        ))}
+      </div>
 
       {isError ? (
         <ErrorState

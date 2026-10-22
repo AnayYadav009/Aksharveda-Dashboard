@@ -28,17 +28,17 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    if (body.action === "mark_notifications_read") {
-      const res = await markNotificationsRead();
-      return NextResponse.json(res);
-    }
-
     const hubResult = HubSchema.safeParse(body.hub);
     if (!hubResult.success) {
       return NextResponse.json(
         { error: "Invalid or missing hub field: must be 'delhi' or 'kolkata'" },
         { status: 400 }
       );
+    }
+
+    if (body.action === "mark_notifications_read") {
+      const res = await markNotificationsRead();
+      return NextResponse.json(res);
     }
 
     if (!body.name) {

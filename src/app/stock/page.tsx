@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Papa from 'papaparse';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -13,6 +14,7 @@ import {
   ErrorState,
 } from '@/components/ui';
 import { formatUnits, formatDate } from '@/lib/format';
+import { Hub } from '@/lib/types';
 import {
   UploadCloud,
   Boxes,
@@ -45,7 +47,18 @@ interface StockPreviewDiff {
 }
 
 export default function StockPage() {
+  return (
+    <React.Suspense fallback={<div className="min-h-64" aria-busy="true" />}>
+      <StockPageContent />
+    </React.Suspense>
+  );
+}
+
+function StockPageContent() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const hub: Hub = searchParams.get('hub') === 'kolkata' ? 'kolkata' : 'delhi';
   const [file, setFile] = useState<File | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [previewDiffs, setPreviewDiffs] = useState<StockPreviewDiff[] | null>(null);
@@ -54,9 +67,9 @@ export default function StockPage() {
 
   // Query existing stock
   const { data, isLoading, isError, error, refetch } = useQuery<{ stock: StockItem[] }>({
-    queryKey: ['stock-data'],
+    queryKey: ['stock-data', hub],
     queryFn: async () => {
-      const res = await fetch('/api/stock?hub=delhi');
+      const res = await fetch(`/api/stock?hub=${hub}`);
       if (!res.ok) throw new Error('Failed to load stock inventory');
       return res.json();
     },
@@ -69,19 +82,25 @@ export default function StockPage() {
     .sort()
     .reverse()[0];
 
+  const selectHub = (nextHub: Hub) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('hub', nextHub);
+    router.replace(`/stock?${params.toString()}`);
+  };
+
   // Stock CSV upload commit mutation
   const uploadStockMutation = useMutation({
     mutationFn: async (updates: Array<{ item_id: string; qty_in_hand: number }>) => {
       const res = await fetch('/api/stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates, hub: 'delhi' }),
+        body: JSON.stringify({ updates, hub }),
       });
       if (!res.ok) throw new Error('Failed to update stock');
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stock-data'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-data', hub] });
       queryClient.invalidateQueries({ queryKey: ['planning'] });
       setPreviewDiffs(null);
       setFile(null);
@@ -147,14 +166,13 @@ export default function StockPage() {
     });
   };
 
-  const handleDownloadSampleCsv = () => {
+  const handleDownloadCsvTemplate = () => {
     const header = 'item_id,qty_in_hand\n';
-    const rows = stockList.slice(0, 5).map((s) => `${s.item_id},${s.qty_in_hand}`).join('\n');
-    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([header], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sample_stock_upload.csv';
+    a.download = 'stock_upload_template.csv';
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -190,6 +208,7 @@ export default function StockPage() {
     },
     {
       key: 'qty_in_hand',
+      numeric: true,
       header: 'Stock in Hand',
       align: 'right',
       sortable: true,
@@ -235,6 +254,15 @@ export default function StockPage() {
         }
       />
 
+      <div className="flex gap-2" role="tablist" aria-label="Inventory hub">
+        {(['delhi', 'kolkata'] as Hub[]).map((option) => (
+          <button key={option} role="tab" aria-selected={hub === option} onClick={() => selectHub(option)}
+            className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize ${hub === option ? 'bg-[var(--accent-teal)] text-white' : 'bg-[var(--surface-raised)] text-[var(--text-secondary)]'}`}>
+            {option}
+          </button>
+        ))}
+      </div>
+
       {/* Upload Dropzone & Diff Section */}
       <div className="p-5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xs space-y-4">
         <div className="flex items-center justify-between">
@@ -244,11 +272,11 @@ export default function StockPage() {
           </div>
           <button
             type="button"
-            onClick={handleDownloadSampleCsv}
+            onClick={handleDownloadCsvTemplate}
             className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--accent-teal)] hover:underline cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            Download Sample CSV (item_id, qty)
+            Download CSV Template (item_id, qty)
           </button>
         </div>
 

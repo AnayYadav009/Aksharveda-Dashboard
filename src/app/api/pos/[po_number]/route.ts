@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPODetail } from "@/lib/data-layer";
+import { HubSchema } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +10,11 @@ export async function GET(
 ) {
   try {
     const { po_number } = await params;
-    const hubParam = req.nextUrl.searchParams.get("hub") as "delhi" | "kolkata" | null;
-    const detail = await getPODetail(po_number, hubParam || undefined);
+    const hubResult = HubSchema.safeParse(req.nextUrl.searchParams.get("hub"));
+    if (!hubResult.success) {
+      return NextResponse.json({ error: "Invalid or missing hub parameter: must be 'delhi' or 'kolkata'" }, { status: 400 });
+    }
+    const detail = await getPODetail(po_number, hubResult.data);
     if (!detail) {
       return NextResponse.json({ error: "PO not found" }, { status: 404 });
     }

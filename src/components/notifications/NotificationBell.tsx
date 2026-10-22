@@ -42,7 +42,7 @@ export function NotificationBell() {
       const res = await fetch('/api/recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'mark_notifications_read' }),
+        body: JSON.stringify({ action: 'mark_notifications_read', hub: 'delhi' }),
       });
       return res.json();
     },
@@ -107,7 +107,7 @@ export function NotificationBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150" style={{ zIndex: "var(--z-modal)" }}>
           <div className="p-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--surface-raised)]">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
