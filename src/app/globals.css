@@ -65,6 +65,14 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  /* Z-index scale — one canonical source of truth */
+  --z-table-sticky: 10;
+  --z-table-sticky-corner: 12;
+  --z-topbar: 30;
+  --z-sidebar: 40;
+  --z-drawer: 50;
+  --z-modal: 60;
 }
 
 .dark {
@@ -130,12 +138,13 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.5);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.5);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.6);
+  /* Z-index scale inherits from :root — no overrides needed in dark mode */
 }
 
 body {
   background-color: var(--surface-bg);
   color: var(--text-primary);
-  font-family: var(--font-ibm-plex-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
   min-height: 100vh;
 }
@@ -168,4 +177,16 @@ nextjs-portal,
 nextjs-portal div:has(> svg[aria-label="Next.js logo"]),
 nextjs-portal [data-nextjs-dev-tools-indicator] {
   display: none !important;
+}
+
+/* Right-edge scroll shadow: visible only when scrollable content exists to the right */
+.scroll-shadow-right {
+  background-image: linear-gradient(to left, rgb(0 0 0 / 0.08) 0%, transparent 20px);
+  background-attachment: local, scroll;
+  background-size: 20px 100%;
+  background-position: right center;
+  background-repeat: no-repeat;
+}
+.dark .scroll-shadow-right {
+  background-image: linear-gradient(to left, rgb(0 0 0 / 0.25) 0%, transparent 20px);
 }

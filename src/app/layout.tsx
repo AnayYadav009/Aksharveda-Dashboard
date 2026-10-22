@@ -1,15 +1,7 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { AppShell } from "@/components/shell/AppShell";
-
-const ibmPlexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-ibm-plex-sans",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Aksharveda Ops Dashboard - Blinkit PO & Dispatch Planning",
@@ -40,7 +32,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${ibmPlexSans.variable} font-sans min-h-screen bg-[var(--surface-ground)] text-[var(--text-primary)] antialiased`}>
+      <body className="font-sans min-h-screen bg-[var(--surface-ground)] text-[var(--text-primary)] antialiased">
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>
