@@ -55,7 +55,7 @@ All notable changes and refactoring phases applied to the Aksharveda Blinkit PO 
 - **Email State Alerts & Absolute Dashboard URL**:
   - Added `NEXT_PUBLIC_APP_URL` (defaulting to `http://localhost:3000`) for absolute dashboard links in notification emails.
   - Implemented real `sendStateChangeAlert` in `EmailNotifier` via Resend API when API key is configured.
-- **Recipient Seeding Protection**: Stopped seeding fake placeholder recipients (`demand@aksharveda.com`, `+919876543210`) in production mode; recipients are loaded strictly via settings UI or database records.
+- **Recipient Seeding Protection**: Stopped seeding fake placeholder recipients in production mode; recipients are loaded strictly via settings UI or database records.
 - **WhatsApp Cloud API Interface**: Isolated `WhatsAppNotifier` behind `IWhatsAppService` interface (`MetaCloudWhatsAppService`) ready for Meta Graph API tokens.
 - **README & License Hygiene**:
   - Updated `README.md` to reference port 3000, correct clone URLs, proprietary license, all migrations, and new auth workflows.
@@ -70,6 +70,15 @@ All notable changes and refactoring phases applied to the Aksharveda Blinkit PO 
 3. `supabase/migrations/20261022000001_fix_upload_log.sql` (Add `total_units`, `total_amount` to `upload_log`, create notification tables)
 4. `supabase/migrations/20261022000002_add_region_to_po_header.sql` (Add `region` column and index on `po_header`)
 5. `supabase/migrations/20261022000003_profiles_and_rls.sql` (Create `profiles` table and enable RLS policies across all domain tables)
+6. `supabase/migrations/20261022000004_add_pending_role.sql` (Allow pending signup profiles)
+7. `supabase/migrations/20261023000001_hub_split_and_auth_lockdown.sql` (Hub-aware keys, inventory scope, pending profile trigger and approved-user RLS)
+
+## [Phase 5] - Hub Isolation, Signup Safety & Cleanup
+- Required hub-scoped PO reads and writes, including stock snapshots and upload history.
+- Added a reviewed migration for hub-aware keys, pending-profile creation, and approved-user RLS policies. The migration has not been run against a database.
+- Removed seeded notification recipients and static notification preview values. Signup now relies on a database-created pending profile, and client profile updates cannot set roles.
+- Removed the tracked environment template and updated setup documentation to keep local environment files untracked.
+- Removed the external Google Fonts build dependency so production builds do not require network access to Google Fonts.
 
 ---
 
