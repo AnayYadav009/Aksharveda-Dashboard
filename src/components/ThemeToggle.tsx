@@ -43,7 +43,7 @@ export function ThemeToggle({ className = "", compact = false }: ThemeToggleProp
         title="Light theme"
       >
         <Sun className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Light</span>
+        <span className="hidden lg:inline">Light</span>
       </button>
 
       <button
@@ -56,7 +56,7 @@ export function ThemeToggle({ className = "", compact = false }: ThemeToggleProp
         title="Dark theme"
       >
         <Moon className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Dark</span>
+        <span className="hidden lg:inline">Dark</span>
       </button>
 
       <button
@@ -69,7 +69,7 @@ export function ThemeToggle({ className = "", compact = false }: ThemeToggleProp
         title="Follow System Theme"
       >
         <Laptop className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">System</span>
+        <span className="hidden lg:inline">System</span>
       </button>
     </div>
   );

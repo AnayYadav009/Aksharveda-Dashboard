@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search,
-  Bell,
   Layers,
   ChevronDown,
   Menu,
@@ -28,7 +27,7 @@ export function TopBar({ onToggleSidebarMobile }: TopBarProps) {
   };
 
   return (
-    <header className="sticky top-0 z-20 h-16 bg-[var(--surface-card)]/90 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 flex items-center justify-between gap-4 transition-colors duration-200">
+    <header className="sticky top-0 h-16 bg-[var(--surface-card)]/90 backdrop-blur-md border-b border-[var(--border-subtle)] px-4 sm:px-6 flex items-center justify-between gap-4 transition-colors duration-200" style={{ zIndex: "var(--z-topbar)" }}>
       {/* Left section: mobile hamburger + Channel Selector */}
       <div className="flex items-center gap-3">
         {onToggleSidebarMobile && (
