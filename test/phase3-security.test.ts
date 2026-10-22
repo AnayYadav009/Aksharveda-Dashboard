@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as supabaseModule from "../src/lib/supabase";
 import { isActionAuthorized } from "../src/lib/auth";
 
 describe("Phase 3 Security & Access Control Suite", () => {
@@ -58,6 +59,7 @@ describe("Phase 3 Security & Access Control Suite", () => {
     });
 
     it("allows demand, warehouse, and management users to access /api/pos", async () => {
+      const supabaseSpy = vi.spyOn(supabaseModule, "getSupabaseClient").mockReturnValue(null);
       const { GET } = await import("../src/app/api/pos/route");
       for (const role of ["demand", "warehouse", "management"]) {
         const req = {
@@ -68,6 +70,7 @@ describe("Phase 3 Security & Access Control Suite", () => {
         const res = await GET(req);
         expect(res.status).toBe(200);
       }
+      supabaseSpy.mockRestore();
     });
   });
 

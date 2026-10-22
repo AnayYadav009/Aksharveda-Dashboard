@@ -10,7 +10,6 @@ export async function proxy(req: NextRequest) {
     pathname.startsWith("/favicon.ico") ||
     pathname === "/login" ||
     pathname === "/signup" ||
-    pathname.startsWith("/api/health") ||
     pathname.match(/\.(png|jpg|jpeg|gif|ico|svg|css|js)$/)
   ) {
     return NextResponse.next();
@@ -23,9 +22,9 @@ export async function proxy(req: NextRequest) {
   const isConfigured =
     supabaseUrl &&
     supabaseAnonKey &&
-    !supabaseUrl.includes("mock.supabase.co") &&
+    !supabaseUrl.includes("supabase.invalid") &&
     !supabaseUrl.includes("your-project") &&
-    !supabaseAnonKey.includes("mock-") &&
+    !supabaseAnonKey.includes("invalid-") &&
     !supabaseAnonKey.includes("your-");
 
   if (!isConfigured) {
@@ -84,7 +83,8 @@ export async function proxy(req: NextRequest) {
     .eq("user_id", user.id)
     .single();
 
-  const userRole = profile?.role;
+  // Missing profiles are treated as unapproved, just like pending profiles.
+  const userRole = profile?.role || "pending";
 
   // If role is pending:
   // - API routes must return 403 Forbidden
