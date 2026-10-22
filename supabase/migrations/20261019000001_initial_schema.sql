@@ -164,12 +164,6 @@ CREATE TABLE IF NOT EXISTS notification_recipients (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO notification_recipients (name, email, phone, role, channel_prefs, is_active)
-VALUES 
-    ('Demand Lead', 'demand@aksharveda.com', '+919876543210', 'Demand', '{"email": true, "whatsapp": true, "in_app": true}'::jsonb, true),
-    ('Warehouse Dispatch', 'dispatch@aksharveda.com', '+919876543211', 'Warehouse', '{"email": true, "whatsapp": true, "in_app": true}'::jsonb, true)
-ON CONFLICT DO NOTHING;
-
 CREATE TABLE IF NOT EXISTS in_app_notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,
