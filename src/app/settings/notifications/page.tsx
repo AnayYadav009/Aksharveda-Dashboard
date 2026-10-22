@@ -20,20 +20,19 @@ export default function NotificationPreviewPage() {
   const { data: uploadsData } = useQuery<{ uploads: UploadLog[] }>({
     queryKey: ['uploads-history'],
     queryFn: async () => {
-      const res = await fetch('/api/uploads');
+      const res = await fetch('/api/uploads?hub=delhi');
       return res.json();
     },
   });
 
   const latestUpload = uploadsData?.uploads?.[0];
 
-  const sampleSummary = {
-    new_pos: latestUpload?.pos_new || 389,
-    total_units: latestUpload?.total_units || 224224,
-    total_amount: latestUpload?.total_amount || 60314416,
-    earliest_expiry: '2026-10-31',
-    fileName: latestUpload?.file_name || 'bulk_po_csv-3672559.csv',
-  };
+  const uploadSummary = latestUpload ? {
+    new_pos: latestUpload.pos_new,
+    total_units: latestUpload.total_units,
+    total_amount: latestUpload.total_amount,
+    fileName: latestUpload.file_name,
+  } : null;
 
   return (
     <div className="space-y-6 pb-16 max-w-5xl">
@@ -68,7 +67,7 @@ export default function NotificationPreviewPage() {
               <div>
                 <span className="text-[var(--text-muted)]">Subject:</span>{' '}
                 <span className="font-semibold text-[var(--text-primary)]">
-                  [Blinkit PO Ingested] {sampleSummary.new_pos} New Purchase Orders
+                  [Blinkit PO Ingested] {uploadSummary?.new_pos ?? 0} New Purchase Orders
                 </span>
               </div>
             </div>
@@ -89,19 +88,19 @@ export default function NotificationPreviewPage() {
               <div className="p-3 rounded bg-[var(--surface-card)] border border-[var(--border-subtle)] space-y-1.5 font-mono">
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">New POs Ingested:</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400">+{sampleSummary.new_pos}</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">+{uploadSummary?.new_pos ?? 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Total Units Ordered:</span>
-                  <span className="font-bold text-[var(--text-primary)]">{formatUnits(sampleSummary.total_units)}</span>
+                  <span className="font-bold text-[var(--text-primary)]">{formatUnits(uploadSummary?.total_units ?? 0)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Total PO Value:</span>
-                  <span className="font-bold text-[var(--text-primary)]">{formatINR(sampleSummary.total_amount)}</span>
+                  <span className="font-bold text-[var(--text-primary)]">{formatINR(uploadSummary?.total_amount ?? 0)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[var(--text-muted)]">Earliest Expiry:</span>
-                  <span className="font-bold text-amber-500">{sampleSummary.earliest_expiry}</span>
+                  <span className="font-bold text-amber-500">{uploadSummary ? uploadSummary.fileName : 'No uploads yet'}</span>
                 </div>
               </div>
 
@@ -143,10 +142,10 @@ export default function NotificationPreviewPage() {
               </p>
 
               <div className="space-y-1 font-mono text-[11px] bg-white/60 dark:bg-black/20 p-2.5 rounded-lg border border-emerald-500/20">
-                <p>📦 *New POs:* +{sampleSummary.new_pos}</p>
-                <p>📊 *Units:* {formatUnits(sampleSummary.total_units)}</p>
-                <p>💰 *Value:* {formatINR(sampleSummary.total_amount)}</p>
-                <p>⏰ *Earliest Expiry:* {sampleSummary.earliest_expiry}</p>
+                <p>📦 *New POs:* +{uploadSummary?.new_pos ?? 0}</p>
+                <p>📊 *Units:* {formatUnits(uploadSummary?.total_units ?? 0)}</p>
+                <p>💰 *Value:* {formatINR(uploadSummary?.total_amount ?? 0)}</p>
+                <p>📄 *Upload:* {uploadSummary?.fileName ?? 'No uploads yet'}</p>
               </div>
 
               <p className="text-[11px] opacity-75">

@@ -30,7 +30,7 @@ export interface Notifier {
 }
 
 /**
- * Real Email Notifier using Resend or mock fallback
+ * Email notifier using Resend when configured
  */
 export class EmailNotifier implements Notifier {
   name = "Email (Resend)";
@@ -81,7 +81,7 @@ View Dashboard: ${dashboardUrl}
         console.error("[EmailNotifier] Resend API error:", err);
       }
     } else {
-      console.log(`[EmailNotifier:Mock] Dispatched email to: ${payload.recipients.join(", ")}\n${body}`);
+      console.info("[EmailNotifier] Resend is not configured; skipped dispatch.");
     }
   }
 
@@ -138,7 +138,7 @@ export class MetaCloudWhatsAppService implements IWhatsAppService {
     const token = process.env.WHATSAPP_API_TOKEN;
     const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-    if (token && phoneId && token !== "mock_token") {
+    if (token && phoneId && token !== "invalid-token") {
       try {
         const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
           method: "POST",
@@ -168,12 +168,8 @@ export class MetaCloudWhatsAppService implements IWhatsAppService {
         return false;
       }
     } else {
-      // Mock / Dev Stub Output
-      console.log(
-        `[WhatsAppService:Stub] Sending template "${template}" to ${to} with params:`,
-        parameters
-      );
-      return true;
+      console.info("[WhatsAppService] Credentials are not configured; skipped dispatch.");
+      return false;
     }
   }
 }
