@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPlanningGrid, updatePlanningRow } from "@/lib/data-layer";
+import { getPlanningGrid, updatePlanningRow } from "../../../lib/data-layer";
 
 export const dynamic = "force-dynamic";
 
@@ -35,15 +35,20 @@ export async function POST(req: NextRequest) {
       const result = await updateSKUShortName(body.item_id, body.short_name.trim());
       return NextResponse.json(result);
     }
-    if (body.action === "upsert_test_po" && body.po_number?.startsWith("TEST-E2E-")) {
-      const { upsertTestPO } = await import("@/lib/data-layer");
-      const result = await upsertTestPO(body.po_number);
-      return NextResponse.json(result);
-    }
-    if (body.action === "delete_test_po" && body.po_number?.startsWith("TEST-E2E-")) {
-      const { deleteTestPO } = await import("@/lib/data-layer");
-      const result = await deleteTestPO(body.po_number);
-      return NextResponse.json(result);
+    if (body.action === "upsert_test_po" || body.action === "delete_test_po") {
+      if (process.env.NODE_ENV === "production") {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      if (body.action === "upsert_test_po" && body.po_number?.startsWith("TEST-E2E-")) {
+        const { upsertTestPO } = await import("../../../lib/data-layer");
+        const result = await upsertTestPO(body.po_number);
+        return NextResponse.json(result);
+      }
+      if (body.action === "delete_test_po" && body.po_number?.startsWith("TEST-E2E-")) {
+        const { deleteTestPO } = await import("../../../lib/data-layer");
+        const result = await deleteTestPO(body.po_number);
+        return NextResponse.json(result);
+      }
     }
     const result = await updatePlanningRow(body);
     return NextResponse.json(result);

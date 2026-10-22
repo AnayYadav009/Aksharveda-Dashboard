@@ -1,7 +1,34 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
 
-const BASE_URL = 'http://localhost:3001';
+const PORT = process.env.PORT || '3000';
+const BASE_URL = `http://localhost:${PORT}`;
+
+// Safety check: Prevent running destructive tests against a non-test Supabase instance
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const isTestSupabase =
+  !supabaseUrl ||
+  supabaseUrl.includes('test') ||
+  supabaseUrl.includes('mock') ||
+  supabaseUrl.includes('localhost') ||
+  process.env.ALLOW_E2E_PROD === 'true';
+
+if (!isTestSupabase && process.env.NODE_ENV === 'production') {
+  throw new Error(
+    `[SECURITY PREVENT] E2E tests refused to run against non-test Supabase instance: ${supabaseUrl}. Configure a test project or mock URL.`
+  );
+}
+
+// Helper to log in test user if auth is required
+async function ensureAuthenticated(page: any) {
+  const loginRequired = await page.evaluate(() => window.location.pathname.includes('/login'));
+  if (loginRequired) {
+    await page.fill('input[type="email"]', 'demand@aksharveda.com');
+    await page.fill('input[type="password"]', 'testpass123');
+    await page.click('button[type="submit"]');
+    await page.waitForNavigation();
+  }
+}
 
 test.describe('Aksharveda Dashboard End-to-End Suite', () => {
   test('1. Upload sample CSV, view /pos totals, and switch views', async ({ page }) => {
@@ -9,6 +36,7 @@ test.describe('Aksharveda Dashboard End-to-End Suite', () => {
 
     // Navigate to /upload
     await page.goto(`${BASE_URL}/upload`);
+    await ensureAuthenticated(page);
     await expect(page.locator('h1')).toContainText('Upload Blinkit PO Export');
 
     // Upload sample CSV

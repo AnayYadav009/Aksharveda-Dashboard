@@ -6,8 +6,10 @@ import { parseAndCleanBlinkitRows } from "../src/lib/parser";
 import { commitUploadTransaction, DatabaseStore } from "../src/lib/db";
 
 describe("CSV Reconciliation & Domain Integrity Suite", () => {
-  it("reconciles raw CSV sums with store import", () => {
-    const csvPath = path.join(process.cwd(), "sample-data", "bulk_po_csv-3672559.csv");
+  it("reconciles raw CSV sums with store import", async () => {
+    const realCsv = path.join(process.cwd(), "sample-data", "bulk_po_csv-3672559.csv");
+    const anonCsv = path.join(process.cwd(), "sample-data", "sample_po_anonymized.csv");
+    const csvPath = fs.existsSync(realCsv) ? realCsv : anonCsv;
     expect(fs.existsSync(csvPath)).toBe(true);
 
     const rawCsv = fs.readFileSync(csvPath, "utf-8");
@@ -59,7 +61,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
       in_app_notifications: [],
     };
 
-    const { preview } = commitUploadTransaction(
+    const { preview } = await commitUploadTransaction(
       validRows,
       "reconciliation_test.csv",
       "test_runner",
@@ -93,7 +95,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     expect(testStore.upload_log[0].total_amount).toBe(60314416);
   });
 
-  it("guarantees idempotency and non-destruction of team planning data", () => {
+  it("guarantees idempotency and non-destruction of team planning data", async () => {
     const sample = [
       {
         channel_id: "blinkit",
@@ -138,7 +140,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     };
 
     // First upload
-    const res1 = commitUploadTransaction(sample, "test1.csv", "tester", testStore, false);
+    const res1 = await commitUploadTransaction(sample, "test1.csv", "tester", testStore, false);
     expect(res1.preview.pos_new).toBe(1);
     expect(testStore.po_plan).toHaveLength(1);
 
@@ -147,7 +149,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     testStore.po_plan[0].internal_dispatch_date = "2026-10-20";
 
     // Second upload (idempotent)
-    const res2 = commitUploadTransaction(sample, "test1.csv", "tester", testStore, false);
+    const res2 = await commitUploadTransaction(sample, "test1.csv", "tester", testStore, false);
     expect(res2.preview.pos_new).toBe(0);
     expect(res2.preview.pos_unchanged).toBe(1);
 
@@ -157,7 +159,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
 
     // Verify state transition audit history
     const stateChangeRow = [{ ...sample[0], po_state: "Scheduled" }];
-    const res3 = commitUploadTransaction(stateChangeRow, "test2.csv", "tester", testStore, false);
+    const res3 = await commitUploadTransaction(stateChangeRow, "test2.csv", "tester", testStore, false);
     expect(res3.preview.pos_updated).toBe(1);
     expect(testStore.po_state_history).toHaveLength(1);
     expect(testStore.po_state_history[0].old_state).toBe("Unscheduled");

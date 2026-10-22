@@ -221,6 +221,7 @@ export default function UploadWizardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           validRows,
+          rejectedRows: preview.rejected_rows,
           fileName: preview.file_name,
           uploadedBy: 'demand_team',
         }),

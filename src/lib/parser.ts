@@ -15,40 +15,65 @@ export function normalizeVendorLegalName(raw: string | undefined | null): string
 }
 
 /**
+ * Region mapping for Northern and Western fulfillment hubs.
+ */
+export const CITY_REGION_MAP: Record<string, string> = {
+  Delhi: "NCR",
+  "New Delhi": "NCR",
+  Gurgaon: "NCR",
+  Gurugram: "NCR",
+  Noida: "NCR",
+  "Greater Noida": "NCR",
+  Ghaziabad: "NCR",
+  Faridabad: "NCR",
+  Bhiwandi: "Mumbai (Bhiwandi)",
+};
+
+export function getRegionForCity(city: string): string | null {
+  return CITY_REGION_MAP[city] || null;
+}
+
+/**
  * Extracts city and facility_code from facility_name.
  * Examples:
  * - "Patna P2 - Feeder Warehouse" -> city: "Patna", facility_code: "P2"
- * - "Surat S2 - Feeder Warehouse" -> city: "Surat", facility_code: "S2"
- * - "Delhi Feeder Hub" -> city: "Delhi", facility_code: ""
+ * - "Ghaziabad Feeder - Warehouse" -> city: "Ghaziabad", facility_code: ""
+ * - "New Delhi Hub" -> city: "New Delhi", facility_code: ""
  */
 export function parseFacilityName(facilityName: string | undefined | null): {
   city: string;
   facility_code: string;
   facility_raw: string;
+  region: string | null;
 } {
   const facility_raw = (facilityName || "").trim();
   if (!facility_raw) {
-    return { city: "Unknown", facility_code: "", facility_raw: "" };
+    return { city: "Unknown", facility_code: "", facility_raw: "", region: null };
   }
 
-  // Regex pattern: matches "CityName Code - ..." or "CityName Code-..."
-  const match = facility_raw.match(/^([A-Za-z\s]+?)\s+([A-Z0-9]+)\s*-\s*/i);
+  // Regex pattern: requiring one letter followed by digits (e.g. P2, K5, S12), no /i flag
+  const match = facility_raw.match(/^([A-Za-z\s]+?)\s+([A-Z]\d+)\s*-\s*/);
   if (match) {
+    const city = match[1].trim();
     return {
-      city: match[1].trim(),
+      city,
       facility_code: match[2].trim(),
       facility_raw,
+      region: getRegionForCity(city),
     };
   }
 
-  // Fallback: match first word as city if followed by hyphen or space
-  const fallbackMatch = facility_raw.match(/^([A-Za-z]+)\b/);
-  const city = fallbackMatch ? fallbackMatch[1].trim() : facility_raw;
+  // Fallback: keep full text before " Feeder", " Hub", " Central", or "-" as the city
+  const fallbackMatch = facility_raw.match(/^([^-\n]+?)(?:\s+(?:Feeder|Hub|Central)|\s*-|$)/i);
+  let city = fallbackMatch && fallbackMatch[1].trim() ? fallbackMatch[1].trim() : facility_raw;
+  // Clean up any remaining trailing tokens if needed
+  city = city.replace(/\s+(Feeder|Hub|Central|Warehouse)$/i, "").trim();
 
   return {
-    city,
+    city: city || facility_raw,
     facility_code: "",
     facility_raw,
+    region: getRegionForCity(city),
   };
 }
 
@@ -124,6 +149,7 @@ export function parseAndCleanBlinkitRows(
 } {
   const validRows: CleanedBlinkitRow[] = [];
   const rejectedRows: RejectedRow[] = [];
+  const seenPoItemSet = new Set<string>();
 
   rawRows.forEach((row, index) => {
     const rowNumber = index + 2; // Line 1 is CSV header
@@ -133,13 +159,41 @@ export function parseAndCleanBlinkitRows(
       return;
     }
 
-    // Ensure po_number is treated strictly as a string
+    // Ensure po_number and item_id are treated strictly as strings
     const sanitizedRaw: Record<string, unknown> = { ...row };
-    if (sanitizedRaw.po_number !== undefined && sanitizedRaw.po_number !== null) {
-      sanitizedRaw.po_number = String(sanitizedRaw.po_number).trim();
+    const poNumberStr = sanitizedRaw.po_number !== undefined && sanitizedRaw.po_number !== null ? String(sanitizedRaw.po_number).trim() : "";
+    const itemIdStr = sanitizedRaw.item_id !== undefined && sanitizedRaw.item_id !== null ? String(sanitizedRaw.item_id).trim() : "";
+
+    sanitizedRaw.po_number = poNumberStr;
+    sanitizedRaw.item_id = itemIdStr;
+
+    // Excel-mangled PO numbers or item IDs check
+    const isMangled = (val: string) => /e\+/i.test(val) || val.includes(".");
+    if (isMangled(poNumberStr) || isMangled(itemIdStr)) {
+      rejectedRows.push({
+        row_number: rowNumber,
+        po_number: poNumberStr,
+        item_id: itemIdStr,
+        reason: "Excel-mangled numeric identifier detected (scientific notation or decimal point). Please re-export the CSV from Blinkit and upload directly without opening/saving in Excel.",
+        raw_data: sanitizedRaw,
+      });
+      return;
     }
-    if (sanitizedRaw.item_id !== undefined && sanitizedRaw.item_id !== null) {
-      sanitizedRaw.item_id = String(sanitizedRaw.item_id).trim();
+
+    // Duplicate (po_number, item_id) check within single file
+    const poItemKey = `${poNumberStr}:${itemIdStr}`;
+    if (poNumberStr && itemIdStr) {
+      if (seenPoItemSet.has(poItemKey)) {
+        rejectedRows.push({
+          row_number: rowNumber,
+          po_number: poNumberStr,
+          item_id: itemIdStr,
+          reason: "Duplicate PO/item row",
+          raw_data: sanitizedRaw,
+        });
+        return;
+      }
+      seenPoItemSet.add(poItemKey);
     }
 
     const parseResult = BlinkitCsvRowSchema.safeParse(sanitizedRaw);
@@ -147,8 +201,8 @@ export function parseAndCleanBlinkitRows(
       const errorMsg = parseResult.error.issues.map(e => `${e.path.join(".")}: ${e.message}`).join("; ");
       rejectedRows.push({
         row_number: rowNumber,
-        po_number: String(sanitizedRaw.po_number || ""),
-        item_id: String(sanitizedRaw.item_id || ""),
+        po_number: poNumberStr,
+        item_id: itemIdStr,
         reason: errorMsg,
         raw_data: sanitizedRaw,
       });
@@ -211,6 +265,7 @@ export function parseAndCleanBlinkitRows(
       total_amount: data.total_amount,
       mrp: data.mrp,
       entity_vendor_legal_name: vendor_legal,
+      region: facility.region,
     });
   });
 

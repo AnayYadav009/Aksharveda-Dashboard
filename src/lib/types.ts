@@ -58,6 +58,7 @@ export interface CleanedBlinkitRow {
   total_amount: number;
   mrp: number;
   entity_vendor_legal_name: string;
+  region?: string | null;
 }
 
 // Upload Validation / Preview Types
@@ -99,6 +100,7 @@ export interface POHeader {
   facility_raw: string;
   city: string;
   facility_code: string;
+  region?: string | null;
   order_date: string;
   expiry_date: string;
   appointment_date: string | null;
@@ -213,4 +215,13 @@ export interface InAppNotification {
   metadata?: Record<string, unknown>;
   is_read: boolean;
   created_at: string;
+}
+
+export type UserRole = "demand" | "warehouse" | "management";
+
+export interface UserProfile {
+  user_id: string;
+  name: string;
+  role: UserRole;
+  created_at?: string;
 }

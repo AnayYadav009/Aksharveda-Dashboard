@@ -35,6 +35,11 @@ export interface Notifier {
 export class EmailNotifier implements Notifier {
   name = "Email (Resend)";
 
+  private getDashboardUrl(path = "/pos"): string {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    return `${baseUrl.replace(/\/$/, "")}${path}`;
+  }
+
   async sendUploadSummary(payload: {
     summary: {
       new_pos: number;
@@ -46,13 +51,14 @@ export class EmailNotifier implements Notifier {
     recipients: string[];
   }): Promise<void> {
     const apiKey = process.env.RESEND_API_KEY;
+    const dashboardUrl = this.getDashboardUrl("/pos");
     const body = `
 New POs Ingested: ${payload.summary.new_pos}
 Total Units: ${payload.summary.total_units.toLocaleString("en-IN")}
 Total Value: ₹${payload.summary.total_amount.toLocaleString("en-IN")}
 Earliest Expiry: ${payload.summary.earliest_expiry}
 Top Facilities: ${payload.summary.top_facilities.map((f) => `${f.name} (${f.qty})`).join(", ")}
-View Dashboard: /pos
+View Dashboard: ${dashboardUrl}
     `.trim();
 
     if (apiKey && apiKey.startsWith("re_") && apiKey !== "re_123456789") {
@@ -85,17 +91,103 @@ View Dashboard: /pos
     new_state: string;
     recipients: string[];
   }): Promise<void> {
-    console.log(
-      `[EmailNotifier] Alert: PO #${payload.po_number} state changed from "${payload.old_state}" -> "${payload.new_state}" to ${payload.recipients.join(", ")}`
-    );
+    const apiKey = process.env.RESEND_API_KEY;
+    const dashboardUrl = this.getDashboardUrl(`/pos?search=${payload.po_number}`);
+    const body = `
+PO State Alert
+Purchase Order #${payload.po_number} state changed from "${payload.old_state}" to "${payload.new_state}".
+View PO Details: ${dashboardUrl}
+    `.trim();
+
+    if (apiKey && apiKey.startsWith("re_") && apiKey !== "re_123456789") {
+      try {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: process.env.NOTIFICATION_FROM_EMAIL || "alerts@aksharveda.com",
+            to: payload.recipients,
+            subject: `[PO Status Alert] PO #${payload.po_number} is now ${payload.new_state}`,
+            text: body,
+          }),
+        });
+        console.log(`[EmailNotifier] Sent state change email to ${payload.recipients.join(", ")}`);
+      } catch (err) {
+        console.error("[EmailNotifier] Resend state alert error:", err);
+      }
+    } else {
+      console.log(
+        `[EmailNotifier] Alert: PO #${payload.po_number} state changed from "${payload.old_state}" -> "${payload.new_state}" to ${payload.recipients.join(", ")}\n${body}`
+      );
+    }
   }
 }
 
 /**
- * WhatsApp Notifier Stub - Logs payload with formatting ready for Meta Cloud API
+ * WhatsApp Service Interface for Meta Cloud API integration
+ */
+export interface IWhatsAppService {
+  sendMessage(to: string, template: string, parameters: string[]): Promise<boolean>;
+}
+
+export class MetaCloudWhatsAppService implements IWhatsAppService {
+  async sendMessage(to: string, template: string, parameters: string[]): Promise<boolean> {
+    const token = process.env.WHATSAPP_API_TOKEN;
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (token && phoneId && token !== "mock_token") {
+      try {
+        const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to,
+            type: "template",
+            template: {
+              name: template,
+              language: { code: "en" },
+              components: [
+                {
+                  type: "body",
+                  parameters: parameters.map((p) => ({ type: "text", text: p })),
+                },
+              ],
+            },
+          }),
+        });
+        return res.ok;
+      } catch (err) {
+        console.error("[WhatsAppService] Cloud API dispatch error:", err);
+        return false;
+      }
+    } else {
+      // Mock / Dev Stub Output
+      console.log(
+        `[WhatsAppService:Stub] Sending template "${template}" to ${to} with params:`,
+        parameters
+      );
+      return true;
+    }
+  }
+}
+
+/**
+ * WhatsApp Notifier - Uses IWhatsAppService interface
  */
 export class WhatsAppNotifier implements Notifier {
-  name = "WhatsApp Cloud API (Stub)";
+  name = "WhatsApp Cloud API";
+  private service: IWhatsAppService;
+
+  constructor(service: IWhatsAppService = new MetaCloudWhatsAppService()) {
+    this.service = service;
+  }
 
   async sendUploadSummary(payload: {
     summary: {
@@ -107,29 +199,14 @@ export class WhatsAppNotifier implements Notifier {
     };
     recipients: string[];
   }): Promise<void> {
-    const templatePayload = {
-      messaging_product: "whatsapp",
-      template: {
-        name: "po_batch_ingested",
-        language: { code: "en" },
-        components: [
-          {
-            type: "body",
-            parameters: [
-              { type: "text", text: String(payload.summary.new_pos) },
-              { type: "text", text: String(payload.summary.total_units) },
-              { type: "text", text: `₹${payload.summary.total_amount.toLocaleString("en-IN")}` },
-              { type: "text", text: payload.summary.earliest_expiry },
-            ],
-          },
-        ],
-      },
-    };
-
-    console.log(
-      `[WhatsAppNotifier:Stub] Logging WhatsApp Cloud API Template Payload for [${payload.recipients.join(", ")}]:\n`,
-      JSON.stringify(templatePayload, null, 2)
-    );
+    for (const recipient of payload.recipients) {
+      await this.service.sendMessage(recipient, "po_batch_ingested", [
+        String(payload.summary.new_pos),
+        String(payload.summary.total_units),
+        `₹${payload.summary.total_amount.toLocaleString("en-IN")}`,
+        payload.summary.earliest_expiry,
+      ]);
+    }
   }
 
   async sendStateChangeAlert(payload: {
@@ -138,9 +215,13 @@ export class WhatsAppNotifier implements Notifier {
     new_state: string;
     recipients: string[];
   }): Promise<void> {
-    console.log(
-      `[WhatsAppNotifier:Stub] Alert: PO #${payload.po_number} transition: "${payload.old_state}" -> "${payload.new_state}" for [${payload.recipients.join(", ")}]`
-    );
+    for (const recipient of payload.recipients) {
+      await this.service.sendMessage(recipient, "po_state_change", [
+        payload.po_number,
+        payload.old_state,
+        payload.new_state,
+      ]);
+    }
   }
 }
 

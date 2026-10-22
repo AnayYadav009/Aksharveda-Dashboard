@@ -7,9 +7,12 @@ import { getNotificationDispatcher } from "./notifications/notifier";
 import { loadStore } from "./db";
 
 export async function runSeed(filePath?: string) {
-  const targetPath =
-    filePath ||
-    path.join(process.cwd(), "sample-data", "bulk_po_csv-3672559.csv");
+  let targetPath = filePath;
+  if (!targetPath) {
+    const defaultReal = path.join(process.cwd(), "sample-data", "bulk_po_csv-3672559.csv");
+    const defaultAnon = path.join(process.cwd(), "sample-data", "sample_po_anonymized.csv");
+    targetPath = fs.existsSync(defaultReal) ? defaultReal : defaultAnon;
+  }
 
   if (!fs.existsSync(targetPath)) {
     throw new Error(`Seed file not found at: ${targetPath}`);
@@ -35,7 +38,9 @@ export async function runSeed(filePath?: string) {
   const { uploadId, preview } = await commitUploadTransaction(
     validRows,
     path.basename(targetPath),
-    "seed_script"
+    "seed_script",
+    false,
+    rejectedRows
   );
 
   console.log("\n📊 Seed Summary:");

@@ -14,10 +14,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { validRows, rejectedRows } = parseAndCleanBlinkitRows(rawRows);
-    const preview = await generateUploadPreview(validRows, fileName || "upload.csv");
-    preview.rows_rejected = rejectedRows.length;
-    preview.rejected_rows = rejectedRows;
-    preview.rows_total = rawRows.length;
+    const preview = await generateUploadPreview(validRows, fileName || "upload.csv", rejectedRows);
 
     return NextResponse.json({ success: true, preview, validRows });
   } catch (err: unknown) {

@@ -16,10 +16,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { updates, item_id, qty_in_hand } = body;
+    const { updates, item_id, qty_in_hand, updated_by, updatedBy } = body;
+    const actor = updated_by || updatedBy || "warehouse_team";
 
     if (item_id !== undefined && qty_in_hand !== undefined) {
-      await updateStockData([{ item_id, qty_in_hand: Number(qty_in_hand) }], "ops_team");
+      await updateStockData([{ item_id, qty_in_hand: Number(qty_in_hand) }], actor);
       return NextResponse.json({ success: true });
     }
 
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
       const formatted = updates
         .filter((u) => Boolean(u.item_id))
         .map((u) => ({ item_id: u.item_id, qty_in_hand: Number(u.qty_in_hand || u.qty) || 0 }));
-      const result = await updateStockData(formatted, "csv_upload");
+      const result = await updateStockData(formatted, actor);
       return NextResponse.json(result);
     }
 

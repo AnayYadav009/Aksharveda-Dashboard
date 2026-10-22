@@ -11,6 +11,7 @@ import {
   NotificationRecipient,
   InAppNotification,
   UploadPreview,
+  RejectedRow,
 } from "./types";
 import { calculateDaysToExpiry } from "./parser";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
@@ -18,8 +19,7 @@ import fs from "fs";
 import path from "path";
 
 // Local storage files for development and zero-config execution
-const ROOT_DIR = "C:\\Anay\\Programming\\Projects\\Aksharveda Dashboard";
-const DATA_DIR = path.join(ROOT_DIR, ".data");
+const DATA_DIR = path.join(process.cwd(), ".data");
 const STORE_PATH = path.join(DATA_DIR, "store.json");
 
 export interface DatabaseStore {
@@ -52,30 +52,33 @@ function getInitialStore(): DatabaseStore {
       near_expiry_days: 7,
       default_recent_days: 30,
     },
-    notification_recipients: [
-      {
-        id: "recip-1",
-        name: "Demand Lead",
-        email: "demand@aksharveda.com",
-        phone: "+919876543210",
-        role: "Demand",
-        channel_prefs: { email: true, whatsapp: true, in_app: true },
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      {
-        id: "recip-2",
-        name: "Warehouse Dispatch",
-        email: "dispatch@aksharveda.com",
-        phone: "+919876543211",
-        role: "Warehouse",
-        channel_prefs: { email: true, whatsapp: true, in_app: true },
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-    ],
+    notification_recipients:
+      process.env.NODE_ENV === "production"
+        ? []
+        : [
+            {
+              id: "recip-1",
+              name: "Demand Lead",
+              email: "demand@aksharveda.com",
+              phone: "+919876543210",
+              role: "Demand",
+              channel_prefs: { email: true, whatsapp: true, in_app: true },
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            {
+              id: "recip-2",
+              name: "Warehouse Dispatch",
+              email: "dispatch@aksharveda.com",
+              phone: "+919876543211",
+              role: "Warehouse",
+              channel_prefs: { email: true, whatsapp: true, in_app: true },
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          ],
     in_app_notifications: [],
   };
 }
@@ -102,7 +105,10 @@ export function saveStore(store: DatabaseStore): void {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(STORE_PATH, JSON.stringify(store, null, 2), "utf-8");
+    // Atomic write pattern: write to temporary file first, then atomically rename
+    const tempPath = path.join(DATA_DIR, `store.${crypto.randomUUID()}.tmp`);
+    fs.writeFileSync(tempPath, JSON.stringify(store, null, 2), "utf-8");
+    fs.renameSync(tempPath, STORE_PATH);
   } catch (err) {
     console.error("Error saving store:", err);
   }
@@ -173,12 +179,18 @@ export async function getUnifiedStore(): Promise<DatabaseStore> {
 export function generateUploadPreview(
   cleanedRows: CleanedBlinkitRow[],
   fileName: string,
-  store: DatabaseStore = loadStore()
+  store: DatabaseStore = loadStore(),
+  rejectedRows: RejectedRow[] = []
 ): UploadPreview {
   const nearExpiryDays = (store.settings.near_expiry_days as number) || 7;
   const existingHeadersMap = new Map<string, POHeader>();
   store.po_header.forEach((h) => {
     existingHeadersMap.set(`${h.channel_id}:${h.po_number}`, h);
+  });
+
+  const existingLinesMap = new Map<string, POLine>();
+  store.po_line.forEach((l) => {
+    existingLinesMap.set(`${l.channel_id}:${l.po_number}:${l.item_id}`, l);
   });
 
   const rowMap = new Map<string, CleanedBlinkitRow[]>();
@@ -195,36 +207,100 @@ export function generateUploadPreview(
   let posUnchanged = 0;
   let posNearExpiry = 0;
   const stateChanges: UploadPreview["state_changes"] = [];
+  const fieldChanges: Record<string, string[]> = {};
 
   rowMap.forEach((lines, key) => {
     const first = lines[0];
     const existing = existingHeadersMap.get(key);
     const daysToExpiry = calculateDaysToExpiry(first.expiry_date);
-    if (daysToExpiry <= nearExpiryDays && daysToExpiry >= 0) {
+    const isOpen = first.po_state !== "Expired" && first.po_state !== "Fulfilled";
+    if (isOpen && daysToExpiry <= nearExpiryDays && daysToExpiry >= 0) {
       posNearExpiry++;
     }
 
     if (!existing) {
       posNew++;
     } else {
-      let isChanged = false;
+      const changedFields = new Set<string>();
+
+      // 1. Header checks
       if (existing.po_state !== first.po_state) {
-        isChanged = true;
+        changedFields.add("po_state");
         stateChanges.push({
           po_number: first.po_number,
           old_state: existing.po_state,
           new_state: first.po_state,
         });
       }
-      if (
-        existing.expiry_date !== first.expiry_date ||
-        existing.appointment_date !== first.appointment_date
-      ) {
-        isChanged = true;
+      if (existing.expiry_date !== first.expiry_date) {
+        changedFields.add("expiry_date");
+      }
+      if (existing.appointment_date !== first.appointment_date) {
+        changedFields.add("appointment_date");
+      }
+      if (first.region !== undefined && existing.region !== first.region) {
+        changedFields.add("region");
+      }
+      if (existing.facility_raw !== first.facility_raw) {
+        changedFields.add("facility_raw");
+      }
+      if (existing.city !== first.city) {
+        changedFields.add("city");
+      }
+      if (existing.facility_code !== first.facility_code) {
+        changedFields.add("facility_code");
       }
 
-      if (isChanged) {
+      // 2. Line checks: item_id, units_ordered, total_grn_quantity, remaining_quantity + rates
+      lines.forEach((l) => {
+        const lineKey = `${l.channel_id}:${l.po_number}:${l.item_id}`;
+        const exLine = existingLinesMap.get(lineKey);
+        if (!exLine) {
+          changedFields.add(`new_item_${l.item_id}`);
+        } else {
+          if (exLine.units_ordered !== l.units_ordered) changedFields.add("units_ordered");
+          if (exLine.total_grn_quantity !== l.total_grn_quantity) changedFields.add("total_grn_quantity");
+          if (exLine.remaining_quantity !== l.remaining_quantity) changedFields.add("remaining_quantity");
+          if (Number(exLine.landing_rate) !== Number(l.landing_rate)) changedFields.add("landing_rate");
+          if (Number(exLine.cost_price) !== Number(l.cost_price)) changedFields.add("cost_price");
+          if (Number(exLine.margin_percentage) !== Number(l.margin_percentage)) changedFields.add("margin_percentage");
+          if (Number(exLine.tax_value) !== Number(l.tax_value)) changedFields.add("tax_value");
+          if (Number(exLine.total_amount) !== Number(l.total_amount)) changedFields.add("line_total_amount");
+        }
+      });
+
+      // Compute merged header totals to see if total_qty or total_amount changed
+      const existingPoLines = store.po_line.filter(
+        (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+      );
+      const incomingByItem = new Map<string, CleanedBlinkitRow>();
+      lines.forEach((l) => incomingByItem.set(l.item_id, l));
+      let mergedTotalQty = 0;
+      let mergedTotalAmount = 0;
+      const countedItems = new Set<string>();
+
+      lines.forEach((l) => {
+        mergedTotalQty += l.units_ordered;
+        mergedTotalAmount += l.total_amount;
+        countedItems.add(l.item_id);
+      });
+      existingPoLines.forEach((l) => {
+        if (!countedItems.has(l.item_id)) {
+          mergedTotalQty += l.units_ordered;
+          mergedTotalAmount += Number(l.total_amount);
+        }
+      });
+
+      if (Number(existing.total_qty) !== mergedTotalQty) {
+        changedFields.add("total_qty");
+      }
+      if (Math.round(Number(existing.total_amount)) !== Math.round(mergedTotalAmount)) {
+        changedFields.add("total_amount");
+      }
+
+      if (changedFields.size > 0) {
         posUpdated++;
+        fieldChanges[first.po_number] = Array.from(changedFields);
       } else {
         posUnchanged++;
       }
@@ -236,18 +312,19 @@ export function generateUploadPreview(
 
   return {
     file_name: fileName,
-    rows_total: cleanedRows.length,
+    rows_total: cleanedRows.length + rejectedRows.length,
     rows_valid: cleanedRows.length,
-    rows_rejected: 0,
+    rows_rejected: rejectedRows.length,
     pos_total: rowMap.size,
     pos_new: posNew,
     pos_updated: posUpdated,
     pos_unchanged: posUnchanged,
     pos_near_expiry: posNearExpiry,
     total_units: totalUnits,
-    total_amount: totalAmount,
+    total_amount: Math.round(totalAmount),
     state_changes: stateChanges,
-    rejected_rows: [],
+    rejected_rows: rejectedRows,
+    field_changes: fieldChanges,
   };
 }
 
@@ -258,19 +335,20 @@ export function generateUploadPreview(
  * 2. Team-owned data (po_plan, po_line_dispatch) is NEVER overwritten.
  * 3. Initial po_plan is inserted ONLY for newly discovered POs.
  */
-export function commitUploadTransaction(
+export async function commitUploadTransaction(
   cleanedRows: CleanedBlinkitRow[],
   fileName: string,
   uploadedBy = "demand_team",
   store: DatabaseStore = loadStore(),
-  persistToDisk = true
-): {
+  persistToDisk = true,
+  rejectedRows: RejectedRow[] = []
+): Promise<{
   uploadId: string;
   preview: UploadPreview;
-} {
-  const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+}> {
+  const uploadId = crypto.randomUUID();
   const nowIso = new Date().toISOString();
-  const preview = generateUploadPreview(cleanedRows, fileName, store);
+  const preview = generateUploadPreview(cleanedRows, fileName, store, rejectedRows);
 
   // Group rows by PO
   const poMap = new Map<string, CleanedBlinkitRow[]>();
@@ -321,15 +399,34 @@ export function commitUploadTransaction(
   // 2. Process each PO
   poMap.forEach((lines, poKey) => {
     const first = lines[0];
-    const totalQty = lines.reduce((acc, cur) => acc + cur.units_ordered, 0);
-    const totalAmount = lines.reduce((acc, cur) => acc + cur.total_amount, 0);
     const existingHeader = headerMap.get(poKey);
 
+    // Compute merged lines for this PO
+    const existingPoLines = store.po_line.filter(
+      (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+    );
+    let totalQty = 0;
+    let totalAmount = 0;
+    const incomingItemIds = new Set<string>();
+
+    lines.forEach((l) => {
+      totalQty += l.units_ordered;
+      totalAmount += l.total_amount;
+      incomingItemIds.add(l.item_id);
+    });
+
     if (existingHeader) {
+      existingPoLines.forEach((l) => {
+        if (!incomingItemIds.has(l.item_id)) {
+          totalQty += l.units_ordered;
+          totalAmount += Number(l.total_amount);
+        }
+      });
+
       // Check state change
       if (existingHeader.po_state !== first.po_state) {
         store.po_state_history.push({
-          id: `hist-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: crypto.randomUUID(),
           channel_id: first.channel_id,
           po_number: first.po_number,
           old_state: existingHeader.po_state,
@@ -345,12 +442,13 @@ export function commitUploadTransaction(
         facility_raw: first.facility_raw,
         city: first.city,
         facility_code: first.facility_code,
+        region: first.region ?? existingHeader.region ?? null,
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
         po_state: first.po_state,
         total_qty: totalQty,
-        total_amount: totalAmount,
+        total_amount: Math.round(totalAmount),
         last_seen_at: nowIso,
         last_upload_id: uploadId,
       });
@@ -362,12 +460,13 @@ export function commitUploadTransaction(
         facility_raw: first.facility_raw,
         city: first.city,
         facility_code: first.facility_code,
+        region: first.region ?? null,
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
         po_state: first.po_state,
         total_qty: totalQty,
-        total_amount: totalAmount,
+        total_amount: Math.round(totalAmount),
         first_seen_at: nowIso,
         last_seen_at: nowIso,
         first_upload_id: uploadId,
@@ -432,21 +531,6 @@ export function commitUploadTransaction(
 
   if (persistToDisk) {
     saveStore(store);
-  }
-
-  // Sync with Supabase if configured
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    (async () => {
-      try {
-        await supabase.from("sku_master").upsert(store.sku_master, { onConflict: "item_id" });
-        await supabase.from("po_header").upsert(store.po_header, { onConflict: "channel_id,po_number" });
-        await supabase.from("po_line").upsert(store.po_line, { onConflict: "channel_id,po_number,item_id" });
-        await supabase.from("upload_log").insert(uploadLogEntry);
-      } catch (err) {
-        console.error("Async Supabase sync error:", err);
-      }
-    })();
   }
 
   return { uploadId, preview };

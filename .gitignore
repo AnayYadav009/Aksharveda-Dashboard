@@ -50,3 +50,7 @@ yarn-error.log*
 
 # Vercel & Deployment
 .vercel/
+
+# Sensitive CSV Exports & Real Data
+sample-data/bulk_po_csv-*.csv
+test-data/*real*

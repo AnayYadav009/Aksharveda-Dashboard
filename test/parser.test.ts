@@ -135,5 +135,90 @@ describe("Parser & Quirks Cleaning Suite", () => {
       expect(rejectedRows[0].row_number).toBe(2);
       expect(rejectedRows[0].reason).toContain("po_number");
     });
+
+    it("rejects duplicate (po_number, item_id) rows within the same upload", () => {
+      const baseRow = {
+        po_number: "51076110020473",
+        facility_name: "Surat S2 - Feeder Warehouse",
+        manufacturer_name: "AKSHARVEDA LIFESTYLE PRIVATE LIMITED",
+        entity_vendor_legal_name: "BLINK COMMERCE PRIVATE LIMITED",
+        vendor_name: "AKSHARVEDA LIFESTYLE PRIVATE LIMITED",
+        order_date: "2026-10-17 00:00:00 +0000 UTC",
+        appointment_date: "",
+        expiry_date: "2026-10-31 18:29:59 +0000 UTC",
+        po_state: "Unscheduled",
+        item_id: "10241917",
+        name: "Brass Lakshmi Ganesh Idol",
+        uom_text: "1 set",
+        upc: "5949997615994",
+        units_ordered: "24",
+        total_grn_quantity: "0",
+        remaining_quantity: "24",
+        landing_rate: "485",
+        cost_price: "461.9",
+        margin_percentage: "53.77",
+        cess_value: "0",
+        sgst_value: "2.5",
+        igst_value: "5",
+        cgst_value: "2.5",
+        tax_value: "5",
+        total_amount: "11640",
+        mrp: "1049",
+      };
+
+      const rows = [{ ...baseRow }, { ...baseRow }];
+      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(rows);
+      expect(validRows).toHaveLength(1);
+      expect(rejectedRows).toHaveLength(1);
+      expect(rejectedRows[0].reason).toBe("Duplicate PO/item row");
+      expect(rejectedRows[0].row_number).toBe(3);
+    });
+
+    it("rejects Excel-mangled scientific notation numbers for po_number and item_id", () => {
+      const rowWithMangledPo = {
+        po_number: "5.10761E+13",
+        facility_name: "Surat S2 - Feeder Warehouse",
+        order_date: "2026-10-17 00:00:00 +0000 UTC",
+        expiry_date: "2026-10-31 18:29:59 +0000 UTC",
+        po_state: "Unscheduled",
+        item_id: "10241917",
+        name: "Item",
+        uom_text: "1 set",
+        upc: "5949997615994",
+        units_ordered: "24",
+        total_grn_quantity: "0",
+        remaining_quantity: "24",
+        landing_rate: "485",
+        cost_price: "461.9",
+        margin_percentage: "53.77",
+        tax_value: "5",
+        total_amount: "11640",
+        mrp: "1049",
+      };
+
+      const { validRows, rejectedRows } = parseAndCleanBlinkitRows([rowWithMangledPo]);
+      expect(validRows).toHaveLength(0);
+      expect(rejectedRows).toHaveLength(1);
+      expect(rejectedRows[0].reason).toContain("Excel-mangled numeric identifier detected");
+    });
+  });
+
+  describe("Facility Parsing & Region Mapping Edge Cases", () => {
+    it("handles non-standard facility names and correctly maps NCR region", () => {
+      const resGhaziabad = parseFacilityName("Ghaziabad Feeder - Warehouse");
+      expect(resGhaziabad.city).toBe("Ghaziabad");
+      expect(resGhaziabad.facility_code).toBe("");
+      expect(resGhaziabad.region).toBe("NCR");
+
+      const resDelhi = parseFacilityName("New Delhi Hub");
+      expect(resDelhi.city).toBe("New Delhi");
+      expect(resDelhi.facility_code).toBe("");
+      expect(resDelhi.region).toBe("NCR");
+
+      const resBhiwandi = parseFacilityName("Bhiwandi B1 - Feeder Warehouse");
+      expect(resBhiwandi.city).toBe("Bhiwandi");
+      expect(resBhiwandi.facility_code).toBe("B1");
+      expect(resBhiwandi.region).toBe("Mumbai (Bhiwandi)");
+    });
   });
 });

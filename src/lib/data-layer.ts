@@ -11,6 +11,7 @@ import {
   NotificationRecipient,
   InAppNotification,
   UploadPreview,
+  RejectedRow,
 } from "./types";
 import { calculateDaysToExpiry } from "./parser";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
@@ -43,6 +44,8 @@ export function invalidateDataCache(prefix?: string) {
 
 /**
  * Checks connection to Supabase via a real live query.
+ * In production (NODE_ENV === "production"), if Supabase is not configured or fails,
+ * throws a clear error instead of falling back to JSON store.
  */
 export async function getDataAdapterStatus(): Promise<DataAdapterStatus> {
   const cacheKey = "status:adapter";
@@ -51,22 +54,53 @@ export async function getDataAdapterStatus(): Promise<DataAdapterStatus> {
     return cached.data;
   }
 
+  const isProduction = process.env.NODE_ENV === "production";
   const supabase = getSupabaseClient();
   if (!supabase) {
+    if (isProduction) {
+      throw new Error("Supabase is not configured in production environment (NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required). Local fallback is disabled in production.");
+    }
     return { isFallback: true, adapter: "json_fallback" };
   }
+
   try {
     const { error } = await supabase.from("channels").select("id").limit(1);
     if (error) {
       console.warn("Supabase health check query failed:", error.message);
+      if (isProduction) {
+        throw new Error(`Supabase query failed in production: ${error.message}. Local fallback is disabled in production.`);
+      }
       return { isFallback: true, adapter: "json_fallback" };
     }
     const result: DataAdapterStatus = { isFallback: false, adapter: "supabase_postgres" };
     queryCache.set(cacheKey, { data: result, timestamp: Date.now() });
     return result;
   } catch (err) {
+    if (isProduction) {
+      throw new Error(`Supabase connection error in production: ${err instanceof Error ? err.message : String(err)}. Local fallback is disabled in production.`);
+    }
     console.warn("Supabase health check exception:", err);
     return { isFallback: true, adapter: "json_fallback" };
+  }
+}
+
+/**
+ * Helper to upsert rows in chunks of 500, checking and throwing on error.
+ */
+async function mustUpsert<T extends Record<string, unknown>>(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  table: string,
+  rows: T[],
+  onConflict: string,
+  chunkSize = 500
+): Promise<void> {
+  if (!supabase) throw new Error("Supabase client is not available for mustUpsert");
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const { error } = await supabase.from(table).upsert(chunk as any, { onConflict });
+    if (error) {
+      throw new Error(`mustUpsert failed on table '${table}' [chunk ${i}-${i + chunk.length}]: ${error.message}`);
+    }
   }
 }
 
@@ -266,10 +300,10 @@ export async function getPODetail(poNumber: string) {
 
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
-    const [headerRes, linesRes, skusRes, planRes, histRes] = await Promise.all([
+    const [headerRes, linesRes, skusList, planRes, histRes] = await Promise.all([
       supabase.from("po_header").select("*").eq("po_number", poNumber).maybeSingle(),
       supabase.from("po_line").select("*").eq("po_number", poNumber),
-      supabase.from("sku_master").select("*"),
+      fetchAllRows<SKUMaster>("sku_master"),
       supabase.from("po_plan").select("*").eq("po_number", poNumber).maybeSingle(),
       supabase.from("po_state_history").select("*").eq("po_number", poNumber).order("changed_at", { ascending: false }),
     ]);
@@ -277,7 +311,7 @@ export async function getPODetail(poNumber: string) {
     if (!headerRes.data) return null;
 
     const skuMap = new Map<string, SKUMaster>();
-    (skusRes.data || []).forEach((s) => skuMap.set(s.item_id, s));
+    skusList.forEach((s) => skuMap.set(s.item_id, s));
 
     const lines = (linesRes.data || []).map((l) => {
       const sku = skuMap.get(l.item_id);
@@ -606,7 +640,8 @@ export async function updatePlanningRow(body: {
  */
 export async function generateUploadPreview(
   cleanedRows: CleanedBlinkitRow[],
-  fileName: string
+  fileName: string,
+  rejectedRows: RejectedRow[] = []
 ): Promise<UploadPreview> {
   const status = await getDataAdapterStatus();
   let existingHeaders: POHeader[] = [];
@@ -670,14 +705,10 @@ export async function generateUploadPreview(
       }
       if (existing.expiry_date !== first.expiry_date) changedFields.add("expiry_date");
       if (existing.appointment_date !== first.appointment_date) changedFields.add("appointment_date");
+      if (first.region !== undefined && existing.region !== first.region) changedFields.add("region");
       if (existing.facility_raw !== first.facility_raw) changedFields.add("facility_raw");
       if (existing.city !== first.city) changedFields.add("city");
       if (existing.facility_code !== first.facility_code) changedFields.add("facility_code");
-
-      const newTotalQty = lines.reduce((s, l) => s + l.units_ordered, 0);
-      const newTotalAmount = lines.reduce((s, l) => s + l.total_amount, 0);
-      if (Number(existing.total_qty) !== newTotalQty) changedFields.add("total_qty");
-      if (Number(existing.total_amount) !== newTotalAmount) changedFields.add("total_amount");
 
       // 2. Compare Line Item fields
       lines.forEach((l) => {
@@ -697,6 +728,29 @@ export async function generateUploadPreview(
         }
       });
 
+      // Compute merged header totals
+      const existingPoLines = existingLines.filter(
+        (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+      );
+      let mergedTotalQty = 0;
+      let mergedTotalAmount = 0;
+      const incomingItemIds = new Set<string>();
+
+      lines.forEach((l) => {
+        mergedTotalQty += l.units_ordered;
+        mergedTotalAmount += l.total_amount;
+        incomingItemIds.add(l.item_id);
+      });
+      existingPoLines.forEach((l) => {
+        if (!incomingItemIds.has(l.item_id)) {
+          mergedTotalQty += l.units_ordered;
+          mergedTotalAmount += Number(l.total_amount);
+        }
+      });
+
+      if (Number(existing.total_qty) !== mergedTotalQty) changedFields.add("total_qty");
+      if (Math.round(Number(existing.total_amount)) !== Math.round(mergedTotalAmount)) changedFields.add("total_amount");
+
       if (changedFields.size > 0) {
         posUpdated++;
         fieldChanges[first.po_number] = Array.from(changedFields);
@@ -711,9 +765,9 @@ export async function generateUploadPreview(
 
   return {
     file_name: fileName,
-    rows_total: cleanedRows.length,
+    rows_total: cleanedRows.length + rejectedRows.length,
     rows_valid: cleanedRows.length,
-    rows_rejected: 0,
+    rows_rejected: rejectedRows.length,
     pos_total: rowMap.size,
     pos_new: posNew,
     pos_updated: posUpdated,
@@ -722,7 +776,7 @@ export async function generateUploadPreview(
     total_units: totalUnits,
     total_amount: Math.round(totalAmount),
     state_changes: stateChanges,
-    rejected_rows: [],
+    rejected_rows: rejectedRows,
     field_changes: fieldChanges,
   };
 }
@@ -735,11 +789,12 @@ export async function commitUploadTransaction(
   cleanedRows: CleanedBlinkitRow[],
   fileName: string,
   uploadedBy = "demand_team",
-  forceErrorAfterHeader = false
+  forceErrorAfterHeader = false,
+  rejectedRows: RejectedRow[] = []
 ): Promise<{ uploadId: string; preview: UploadPreview }> {
   const uploadId = crypto.randomUUID();
   const nowIso = new Date().toISOString();
-  const preview = await generateUploadPreview(cleanedRows, fileName);
+  const preview = await generateUploadPreview(cleanedRows, fileName, rejectedRows);
   const status = await getDataAdapterStatus();
 
   // Group by PO
@@ -756,6 +811,7 @@ export async function commitUploadTransaction(
     // Backup current state for rollback if server-side transaction fails
     const existingPOs = Array.from(poMap.keys()).map((k) => k.split(":")[1]);
     const { data: backupHeaders } = await supabase.from("po_header").select("*").in("po_number", existingPOs);
+    const { data: backupLines } = await supabase.from("po_line").select("*").in("po_number", existingPOs);
 
     try {
       // 1. Insert upload_log entry
@@ -765,13 +821,15 @@ export async function commitUploadTransaction(
         file_name: fileName,
         uploaded_by: uploadedBy,
         uploaded_at: nowIso,
-        rows_total: cleanedRows.length,
+        rows_total: preview.rows_total,
         pos_new: preview.pos_new,
         pos_updated: preview.pos_updated,
         pos_unchanged: preview.pos_unchanged,
         rows_rejected: preview.rows_rejected,
+        total_units: preview.total_units,
+        total_amount: preview.total_amount,
         status: "completed",
-        error_report: { total_units: preview.total_units, total_amount: preview.total_amount },
+        error_report: preview.rejected_rows,
       });
       if (logErr) throw new Error(`upload_log insert failed: ${logErr.message}`);
 
@@ -789,8 +847,7 @@ export async function commitUploadTransaction(
           });
         }
       });
-      const { error: skuErr } = await supabase.from("sku_master").upsert(Array.from(skuMap.values()), { onConflict: "item_id" });
-      if (skuErr) throw new Error(`sku_master upsert failed: ${skuErr.message}`);
+      await mustUpsert(supabase, "sku_master", Array.from(skuMap.values()) as unknown as Record<string, unknown>[], "item_id");
 
       // 3. Upsert PO Headers
       const headersToUpsert: POHeader[] = [];
@@ -800,11 +857,28 @@ export async function commitUploadTransaction(
 
       poMap.forEach((lines, poKey) => {
         const first = lines[0];
-        const totalQty = lines.reduce((acc, cur) => acc + cur.units_ordered, 0);
-        const totalAmount = lines.reduce((acc, cur) => acc + cur.total_amount, 0);
         const ex = backupHeaders?.find((h) => h.po_number === first.po_number);
 
+        // Compute merged totals (existing lines for this PO not in incoming + incoming lines)
+        let totalQty = 0;
+        let totalAmount = 0;
+        const incomingItemIds = new Set<string>();
+
+        lines.forEach((l) => {
+          totalQty += l.units_ordered;
+          totalAmount += l.total_amount;
+          incomingItemIds.add(l.item_id);
+        });
+
         if (ex) {
+          const exPoLines = (backupLines || []).filter((l) => l.po_number === first.po_number);
+          exPoLines.forEach((l) => {
+            if (!incomingItemIds.has(l.item_id)) {
+              totalQty += l.units_ordered;
+              totalAmount += Number(l.total_amount);
+            }
+          });
+
           if (ex.po_state !== first.po_state) {
             stateHistoryToInsert.push({
               id: crypto.randomUUID(),
@@ -821,12 +895,13 @@ export async function commitUploadTransaction(
             facility_raw: first.facility_raw,
             city: first.city,
             facility_code: first.facility_code,
+            region: first.region ?? ex.region ?? null,
             order_date: first.order_date,
             expiry_date: first.expiry_date,
             appointment_date: first.appointment_date,
             po_state: first.po_state,
             total_qty: totalQty,
-            total_amount: totalAmount,
+            total_amount: Math.round(totalAmount),
             last_seen_at: nowIso,
             last_upload_id: uploadId,
           });
@@ -837,12 +912,13 @@ export async function commitUploadTransaction(
             facility_raw: first.facility_raw,
             city: first.city,
             facility_code: first.facility_code,
+            region: first.region ?? null,
             order_date: first.order_date,
             expiry_date: first.expiry_date,
             appointment_date: first.appointment_date,
             po_state: first.po_state,
             total_qty: totalQty,
-            total_amount: totalAmount,
+            total_amount: Math.round(totalAmount),
             first_seen_at: nowIso,
             last_seen_at: nowIso,
             first_upload_id: uploadId,
@@ -864,8 +940,7 @@ export async function commitUploadTransaction(
         }
       });
 
-      const { error: headerErr } = await supabase.from("po_header").upsert(headersToUpsert, { onConflict: "channel_id,po_number" });
-      if (headerErr) throw new Error(`po_header upsert failed: ${headerErr.message}`);
+      await mustUpsert(supabase, "po_header", headersToUpsert as unknown as Record<string, unknown>[], "channel_id,po_number");
 
       // ATOMICITY SIMULATION TEST: Throw error if requested
       if (forceErrorAfterHeader) {
@@ -887,22 +962,24 @@ export async function commitUploadTransaction(
         total_amount: line.total_amount,
       }));
 
-      for (let i = 0; i < linesToUpsert.length; i += 500) {
-        const chunk = linesToUpsert.slice(i, i + 500);
-        const { error: lineErr } = await supabase.from("po_line").upsert(chunk, { onConflict: "channel_id,po_number,item_id" });
-        if (lineErr) throw new Error(`po_line upsert failed at batch ${i}: ${lineErr.message}`);
-      }
+      await mustUpsert(supabase, "po_line", linesToUpsert as unknown as Record<string, unknown>[], "channel_id,po_number,item_id");
 
       // 5. Insert Plans for new POs (never overwriting team data)
       if (plansToInsert.length > 0) {
-        const { error: planErr } = await supabase.from("po_plan").insert(plansToInsert);
-        if (planErr) console.warn("po_plan insert warning:", planErr.message);
+        for (let i = 0; i < plansToInsert.length; i += 500) {
+          const chunk = plansToInsert.slice(i, i + 500);
+          const { error: planErr } = await supabase.from("po_plan").insert(chunk);
+          if (planErr) throw new Error(`po_plan insert failed: ${planErr.message}`);
+        }
       }
 
       // 6. Insert State History
       if (stateHistoryToInsert.length > 0) {
-        const { error: histErr } = await supabase.from("po_state_history").insert(stateHistoryToInsert);
-        if (histErr) console.warn("po_state_history insert warning:", histErr.message);
+        for (let i = 0; i < stateHistoryToInsert.length; i += 500) {
+          const chunk = stateHistoryToInsert.slice(i, i + 500);
+          const { error: histErr } = await supabase.from("po_state_history").insert(chunk);
+          if (histErr) throw new Error(`po_state_history insert failed: ${histErr.message}`);
+        }
       }
 
       // Sync local store as mirror cache
@@ -1040,11 +1117,30 @@ async function commitUploadFallback(
 
   poMap.forEach((lines, poKey) => {
     const first = lines[0];
-    const totalQty = lines.reduce((acc, cur) => acc + cur.units_ordered, 0);
-    const totalAmount = lines.reduce((acc, cur) => acc + cur.total_amount, 0);
     const existingHeader = headerMap.get(poKey);
 
+    // Compute merged totals
+    const existingPoLines = store.po_line.filter(
+      (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+    );
+    let totalQty = 0;
+    let totalAmount = 0;
+    const incomingItemIds = new Set<string>();
+
+    lines.forEach((l) => {
+      totalQty += l.units_ordered;
+      totalAmount += l.total_amount;
+      incomingItemIds.add(l.item_id);
+    });
+
     if (existingHeader) {
+      existingPoLines.forEach((l) => {
+        if (!incomingItemIds.has(l.item_id)) {
+          totalQty += l.units_ordered;
+          totalAmount += Number(l.total_amount);
+        }
+      });
+
       if (existingHeader.po_state !== first.po_state) {
         store.po_state_history.push({
           id: crypto.randomUUID(),
@@ -1061,12 +1157,13 @@ async function commitUploadFallback(
         facility_raw: first.facility_raw,
         city: first.city,
         facility_code: first.facility_code,
+        region: first.region ?? existingHeader.region ?? null,
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
         po_state: first.po_state,
         total_qty: totalQty,
-        total_amount: totalAmount,
+        total_amount: Math.round(totalAmount),
         last_seen_at: nowIso,
         last_upload_id: uploadId,
       });
@@ -1077,12 +1174,13 @@ async function commitUploadFallback(
         facility_raw: first.facility_raw,
         city: first.city,
         facility_code: first.facility_code,
+        region: first.region ?? null,
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
         po_state: first.po_state,
         total_qty: totalQty,
-        total_amount: totalAmount,
+        total_amount: Math.round(totalAmount),
         first_seen_at: nowIso,
         last_seen_at: nowIso,
         first_upload_id: uploadId,
@@ -1214,12 +1312,12 @@ export async function getRecipientsData(): Promise<{
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
-    const [recipRes, notifRes] = await Promise.all([
-      supabase.from("notification_recipients").select("*"),
+    const [recipList, notifRes] = await Promise.all([
+      fetchAllRows<NotificationRecipient>("notification_recipients"),
       supabase.from("in_app_notifications").select("*").order("created_at", { ascending: false }),
     ]);
     return {
-      recipients: recipRes.data || [],
+      recipients: recipList,
       in_app_notifications: notifRes.data || [],
     };
   } else {
@@ -1307,8 +1405,7 @@ export async function markNotificationsRead() {
 export async function getUploadLogs(): Promise<UploadLog[]> {
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
-    const supabase = getSupabaseClient()!;
-    const { data } = await supabase.from("upload_log").select("*").order("uploaded_at", { ascending: false });
+    const data = await fetchAllRows<any>("upload_log", "*", { column: "uploaded_at", ascending: false });
     return (data || []).map((d) => ({
       id: d.id,
       channel_id: d.channel_id,
@@ -1322,8 +1419,8 @@ export async function getUploadLogs(): Promise<UploadLog[]> {
       rows_rejected: d.rows_rejected,
       status: d.status,
       error_report: d.error_report,
-      total_units: d.error_report?.total_units || 0,
-      total_amount: d.error_report?.total_amount || 0,
+      total_units: d.total_units || d.error_report?.total_units || 0,
+      total_amount: d.total_amount || d.error_report?.total_amount || 0,
     }));
   } else {
     return loadStore().upload_log;

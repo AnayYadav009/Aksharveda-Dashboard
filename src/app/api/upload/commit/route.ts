@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { validRows, fileName, uploadedBy, forceErrorAfterHeader } = body;
+    const { validRows, rejectedRows, fileName, uploadedBy, forceErrorAfterHeader } = body;
 
     if (!Array.isArray(validRows) || validRows.length === 0) {
       return NextResponse.json({ error: "No valid rows provided for commit" }, { status: 400 });
@@ -19,7 +19,8 @@ export async function POST(req: NextRequest) {
       validRows as CleanedBlinkitRow[],
       fileName || "upload.csv",
       uploadedBy || "demand_team",
-      Boolean(forceErrorAfterHeader)
+      Boolean(forceErrorAfterHeader),
+      Array.isArray(rejectedRows) ? rejectedRows : []
     );
 
     const store = loadStore();
