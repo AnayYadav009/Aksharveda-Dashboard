@@ -1,17 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getPlanningGrid } from "@/lib/data-layer";
+import { HubSchema } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
     const searchParams = req.nextUrl.searchParams;
+    const hubParam = searchParams.get("hub");
+    const hubResult = HubSchema.safeParse(hubParam);
+    if (!hubResult.success) {
+      return NextResponse.json(
+        { error: "Invalid or missing hub parameter: must be 'delhi' or 'kolkata'" },
+        { status: 400 }
+      );
+    }
+    const hub = hubResult.data;
+
     const hideExpiredAndFulfilled = searchParams.get("hideClosed") !== "false";
     const city = searchParams.get("city") || "";
     const state = searchParams.get("state") || "";
 
     const { skus, rows } = await getPlanningGrid({
+      hub,
       hideClosed: hideExpiredAndFulfilled,
       city,
       state,

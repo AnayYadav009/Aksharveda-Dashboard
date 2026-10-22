@@ -42,7 +42,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     expect(rawTotalAmount).toBe(60314416);
 
     // Import into clean isolated store
-    const { validRows, rejectedRows } = parseAndCleanBlinkitRows(rawRows);
+    const { validRows, rejectedRows } = parseAndCleanBlinkitRows(rawRows, "delhi");
     expect(rejectedRows).toHaveLength(0);
     expect(validRows).toHaveLength(2124);
 
@@ -99,6 +99,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     const sample = [
       {
         channel_id: "blinkit",
+        hub: "delhi" as const,
         po_number: "51076110020473",
         facility_raw: "Surat S2 - Feeder Warehouse",
         city: "Surat",

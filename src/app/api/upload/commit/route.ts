@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { commitUploadTransaction } from "@/lib/data-layer";
-import { CleanedBlinkitRow } from "@/lib/types";
+import { CleanedBlinkitRow, HubSchema } from "@/lib/types";
 import { getNotificationDispatcher } from "@/lib/notifications/notifier";
 import { loadStore } from "@/lib/db";
 
@@ -9,7 +9,16 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { validRows, rejectedRows, fileName, uploadedBy, forceErrorAfterHeader } = body;
+    const { validRows, rejectedRows, fileName, uploadedBy, forceErrorAfterHeader, hub } = body;
+
+    const targetHub = hub || (Array.isArray(validRows) && validRows[0]?.hub);
+    const hubResult = HubSchema.safeParse(targetHub);
+    if (!hubResult.success) {
+      return NextResponse.json(
+        { error: "Invalid or missing hub: must be 'delhi' or 'kolkata'" },
+        { status: 400 }
+      );
+    }
 
     if (!Array.isArray(validRows) || validRows.length === 0) {
       return NextResponse.json({ error: "No valid rows provided for commit" }, { status: 400 });

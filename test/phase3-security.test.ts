@@ -47,7 +47,7 @@ describe("Phase 3 Security & Access Control Suite", () => {
     it("blocks pending user from /api/pos with 403 Forbidden", async () => {
       const { GET } = await import("../src/app/api/pos/route");
       const req = {
-        nextUrl: new URL("http://localhost:3000/api/pos"),
+        nextUrl: new URL("http://localhost:3000/api/pos?hub=delhi"),
         headers: new Headers({ "x-test-role": "pending" }),
       } as any;
 
@@ -61,7 +61,7 @@ describe("Phase 3 Security & Access Control Suite", () => {
       const { GET } = await import("../src/app/api/pos/route");
       for (const role of ["demand", "warehouse", "management"]) {
         const req = {
-          nextUrl: new URL("http://localhost:3000/api/pos"),
+          nextUrl: new URL("http://localhost:3000/api/pos?hub=delhi"),
           headers: new Headers({ "x-test-role": role }),
         } as any;
 

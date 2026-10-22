@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStockData, updateStockData } from "@/lib/data-layer";
+import { HubSchema } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const searchParams = req.nextUrl.searchParams;
+    const hubParam = searchParams.get("hub");
+    const hubResult = HubSchema.safeParse(hubParam);
+    if (!hubResult.success) {
+      return NextResponse.json(
+        { error: "Invalid or missing hub parameter: must be 'delhi' or 'kolkata'" },
+        { status: 400 }
+      );
+    }
+
     const stock = await getStockData();
     return NextResponse.json({ stock });
   } catch (err: unknown) {
@@ -16,7 +27,15 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { updates, item_id, qty_in_hand, updated_by, updatedBy } = body;
+    const { updates, item_id, qty_in_hand, updated_by, updatedBy, hub } = body;
+    const hubResult = HubSchema.safeParse(hub);
+    if (!hubResult.success) {
+      return NextResponse.json(
+        { error: "Invalid or missing hub field: must be 'delhi' or 'kolkata'" },
+        { status: 400 }
+      );
+    }
+
     const actor = updated_by || updatedBy || "warehouse_team";
 
     if (item_id !== undefined && qty_in_hand !== undefined) {

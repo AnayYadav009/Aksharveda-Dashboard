@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDashboardData } from "../../../lib/data-layer";
 import { authenticateApiRequest } from "../../../lib/server-auth";
+import { HubSchema } from "../../../lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,16 @@ export async function GET(req: NextRequest) {
     }
 
     const searchParams = req.nextUrl.searchParams;
+    const hubParam = searchParams.get("hub");
+    const hubResult = HubSchema.safeParse(hubParam);
+    if (!hubResult.success) {
+      return NextResponse.json(
+        { error: "Invalid or missing hub parameter: must be 'delhi' or 'kolkata'" },
+        { status: 400 }
+      );
+    }
+    const hub = hubResult.data;
+
     const view = searchParams.get("view") || "month";
     const month = searchParams.get("month");
     const days = parseInt(searchParams.get("days") || "30", 10);
@@ -25,6 +36,7 @@ export async function GET(req: NextRequest) {
     const paginate = searchParams.get("paginate") !== "false";
 
     const data = await getDashboardData({
+      hub,
       view,
       month,
       days,

@@ -9,7 +9,8 @@ export async function GET(
 ) {
   try {
     const { po_number } = await params;
-    const detail = await getPODetail(po_number);
+    const hubParam = req.nextUrl.searchParams.get("hub") as "delhi" | "kolkata" | null;
+    const detail = await getPODetail(po_number, hubParam || undefined);
     if (!detail) {
       return NextResponse.json({ error: "PO not found" }, { status: 404 });
     }

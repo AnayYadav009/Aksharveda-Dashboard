@@ -24,6 +24,7 @@ describe("Phase 2 Upload Logic Bugs Suite", () => {
 
   const sampleRow1: CleanedBlinkitRow = {
     channel_id: "blinkit",
+    hub: "delhi",
     po_number: "PO-1001",
     facility_raw: "Ghaziabad Feeder - Warehouse",
     city: "Ghaziabad",

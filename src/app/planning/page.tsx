@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -14,6 +15,7 @@ import {
 import { StateType } from '@/components/ui/StateBadge';
 import { PODetailDrawer, PODetailResponse } from '@/components/po/PODetailDrawer';
 import { formatINR, formatUnits, formatDate, daysLeft } from '@/lib/format';
+import { Hub } from '@/lib/types';
 import {
   FileSpreadsheet,
   Download,
@@ -73,6 +75,19 @@ interface PlanningApiResponse {
 }
 
 export default function PlanningPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-xs text-[var(--text-muted)]">Loading Planning Sheet...</div>}>
+      <PlanningContent />
+    </Suspense>
+  );
+}
+
+function PlanningContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawHub = searchParams.get('hub');
+  const hub: Hub = rawHub === 'kolkata' ? 'kolkata' : 'delhi';
+
   const queryClient = useQueryClient();
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -91,11 +106,19 @@ export default function PlanningPage() {
   // Drawer state
   const [selectedPoNumber, setSelectedPoNumber] = useState<string | null>(null);
 
+  const handleHubChange = (newHub: Hub) => {
+    if (newHub === hub) return;
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set('hub', newHub);
+    router.replace(`/planning?${nextParams.toString()}`, { scroll: false });
+  };
+
   // Data Query
   const { data, isLoading, isError, error, refetch } = useQuery<PlanningApiResponse>({
-    queryKey: ['planning', hideClosed, selectedCity, selectedState],
+    queryKey: ['planning', hub, hideClosed, selectedCity, selectedState],
     queryFn: async () => {
       const p = new URLSearchParams({
+        hub,
         hideClosed: hideClosed.toString(),
         city: selectedCity,
         state: selectedState,
@@ -109,10 +132,10 @@ export default function PlanningPage() {
 
   // Drawer Query
   const { data: drawerData, isLoading: drawerLoading } = useQuery<PODetailResponse>({
-    queryKey: ['po-detail', selectedPoNumber],
+    queryKey: ['po-detail', hub, selectedPoNumber],
     queryFn: async () => {
       if (!selectedPoNumber) return null as any;
-      const res = await fetch(`/api/pos/${selectedPoNumber}`);
+      const res = await fetch(`/api/pos/${selectedPoNumber}?hub=${hub}`);
       if (!res.ok) throw new Error('Failed to load PO detail');
       return res.json();
     },
@@ -125,7 +148,7 @@ export default function PlanningPage() {
       const res = await fetch('/api/planning', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, hub }),
       });
       if (!res.ok) throw new Error('Save failed');
       return res.json();
@@ -138,7 +161,7 @@ export default function PlanningPage() {
     onSuccess: (_, variables) => {
       setGlobalSaveStatus('saved');
       setLastSavedAt(new Date());
-      queryClient.invalidateQueries({ queryKey: ['planning'] });
+      queryClient.invalidateQueries({ queryKey: ['planning', hub] });
       const cellKey = `${variables.po_number}:${Object.keys(variables)[1]}`;
       setCellSaving((prev) => ({ ...prev, [cellKey]: 'saved' }));
       setTimeout(() => {
@@ -162,7 +185,7 @@ export default function PlanningPage() {
       const res = await fetch('/api/stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, hub }),
       });
       if (!res.ok) throw new Error('Stock update failed');
       return res.json();
@@ -173,7 +196,7 @@ export default function PlanningPage() {
 
       // Optimistically update query data
       queryClient.setQueryData<PlanningApiResponse>(
-        ['planning', hideClosed, selectedCity, selectedState],
+        ['planning', hub, hideClosed, selectedCity, selectedState],
         (old) => {
           if (!old) return old;
           return {
@@ -217,7 +240,7 @@ export default function PlanningPage() {
       const res = await fetch('/api/planning', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_sku_short_name', ...payload }),
+        body: JSON.stringify({ action: 'update_sku_short_name', hub, ...payload }),
       });
       if (!res.ok) throw new Error('Short name update failed');
       return res.json();
@@ -226,7 +249,7 @@ export default function PlanningPage() {
       setGlobalSaveStatus('saving');
       setCellSaving((prev) => ({ ...prev, [`sku_name:${item_id}`]: 'saving' }));
       queryClient.setQueryData<PlanningApiResponse>(
-        ['planning', hideClosed, selectedCity, selectedState],
+        ['planning', hub, hideClosed, selectedCity, selectedState],
         (old) => {
           if (!old) return old;
           return {
@@ -321,6 +344,7 @@ export default function PlanningPage() {
   // Export to Excel handler
   const handleExportExcel = () => {
     const p = new URLSearchParams({
+      hub,
       hideClosed: hideClosed.toString(),
       city: selectedCity,
       state: selectedState,
@@ -366,6 +390,52 @@ export default function PlanningPage() {
           </div>
         }
       />
+
+      {/* Top-Level Hub Switcher Tabs */}
+      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleHubChange('delhi')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
+              hub === 'delhi'
+                ? 'bg-[var(--accent-teal)] text-white shadow-xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+            }`}
+          >
+            <span>Delhi POs</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                hub === 'delhi' ? 'bg-white/20 text-white' : 'bg-[var(--surface-raised)] text-[var(--text-muted)]'
+              }`}
+            >
+              North Hub
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleHubChange('kolkata')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
+              hub === 'kolkata'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+            }`}
+          >
+            <span>Kolkata POs</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                hub === 'kolkata' ? 'bg-white/20 text-white' : 'bg-[var(--surface-raised)] text-[var(--text-muted)]'
+              }`}
+            >
+              East Hub
+            </span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-[var(--text-muted)] hidden sm:block">
+          Active Hub: <span className="font-semibold uppercase tracking-wider text-[var(--text-primary)]">{hub}</span>
+        </div>
+      </div>
 
       {/* Stock Not Loaded Notice Banner */}
       {!isLoading && data && !data.isStockLoaded && (

@@ -25,7 +25,7 @@ export function NotificationBell() {
   const { data } = useQuery<{ in_app_notifications: InAppNotification[] }>({
     queryKey: ['notifications'],
     queryFn: async () => {
-      const res = await fetch('/api/recipients');
+      const res = await fetch('/api/recipients?hub=delhi');
       if (!res.ok) throw new Error('Failed to fetch notifications');
       return res.json();
     },

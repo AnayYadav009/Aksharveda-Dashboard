@@ -30,11 +30,15 @@ export const BlinkitCsvRowSchema = z.object({
   mrp: z.coerce.number().nonnegative().default(0),
 });
 
+export const HubSchema = z.enum(["delhi", "kolkata"]);
+export type Hub = z.infer<typeof HubSchema>;
+
 export type BlinkitCsvRow = z.infer<typeof BlinkitCsvRowSchema>;
 
 // Normalized Clean Row
 export interface CleanedBlinkitRow {
   channel_id: string;
+  hub: Hub;
   po_number: string;
   facility_raw: string;
   city: string;
@@ -78,6 +82,7 @@ export interface StateChangePreview {
 
 export interface UploadPreview {
   file_name: string;
+  hub: Hub;
   rows_total: number;
   rows_valid: number;
   rows_rejected: number;
@@ -96,6 +101,7 @@ export interface UploadPreview {
 // Database entities
 export interface POHeader {
   channel_id: string;
+  hub: Hub;
   po_number: string;
   facility_raw: string;
   city: string;
@@ -116,6 +122,7 @@ export interface POHeader {
 
 export interface POLine {
   channel_id: string;
+  hub: Hub;
   po_number: string;
   item_id: string;
   units_ordered: number;
@@ -130,6 +137,7 @@ export interface POLine {
 
 export interface POPlan {
   channel_id: string;
+  hub: Hub;
   po_number: string;
   remarks: string;
   central_appointment_date: string | null;
@@ -141,6 +149,7 @@ export interface POPlan {
 
 export interface POLineDispatch {
   channel_id: string;
+  hub: Hub;
   po_number: string;
   item_id: string;
   qty_dispatched: number;
@@ -167,6 +176,7 @@ export interface StockSnapshot {
 export interface POStateHistory {
   id?: string;
   channel_id: string;
+  hub: Hub;
   po_number: string;
   old_state: string;
   new_state: string;
@@ -177,6 +187,7 @@ export interface POStateHistory {
 export interface UploadLog {
   id: string;
   channel_id: string;
+  hub: Hub;
   file_name: string;
   uploaded_by: string;
   uploaded_at: string;

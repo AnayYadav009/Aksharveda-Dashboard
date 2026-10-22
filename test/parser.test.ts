@@ -102,10 +102,11 @@ describe("Parser & Quirks Cleaning Suite", () => {
         },
       ];
 
-      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(sample);
+      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(sample, "delhi");
       expect(rejectedRows).toHaveLength(0);
       expect(validRows).toHaveLength(1);
       const row = validRows[0];
+      expect(row.hub).toBe("delhi");
       expect(row.po_number).toBe("51076110020473");
       expect(row.city).toBe("Surat");
       expect(row.facility_code).toBe("S2");
@@ -129,7 +130,7 @@ describe("Parser & Quirks Cleaning Suite", () => {
           name: "Item",
         },
       ];
-      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(badSample);
+      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(badSample, "delhi");
       expect(validRows).toHaveLength(0);
       expect(rejectedRows).toHaveLength(1);
       expect(rejectedRows[0].row_number).toBe(2);
@@ -167,8 +168,9 @@ describe("Parser & Quirks Cleaning Suite", () => {
       };
 
       const rows = [{ ...baseRow }, { ...baseRow }];
-      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(rows);
+      const { validRows, rejectedRows } = parseAndCleanBlinkitRows(rows, "kolkata");
       expect(validRows).toHaveLength(1);
+      expect(validRows[0].hub).toBe("kolkata");
       expect(rejectedRows).toHaveLength(1);
       expect(rejectedRows[0].reason).toBe("Duplicate PO/item row");
       expect(rejectedRows[0].row_number).toBe(3);
@@ -196,7 +198,7 @@ describe("Parser & Quirks Cleaning Suite", () => {
         mrp: "1049",
       };
 
-      const { validRows, rejectedRows } = parseAndCleanBlinkitRows([rowWithMangledPo]);
+      const { validRows, rejectedRows } = parseAndCleanBlinkitRows([rowWithMangledPo], "delhi");
       expect(validRows).toHaveLength(0);
       expect(rejectedRows).toHaveLength(1);
       expect(rejectedRows[0].reason).toContain("Excel-mangled numeric identifier detected");

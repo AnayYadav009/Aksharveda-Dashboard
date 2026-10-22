@@ -39,6 +39,9 @@ test.describe('Aksharveda Dashboard End-to-End Suite', () => {
     await ensureAuthenticated(page);
     await expect(page.locator('h1')).toContainText('Upload Blinkit PO Export');
 
+    // Select Delhi Hub
+    await page.click('button:has-text("Delhi Hub")');
+
     // Upload sample CSV
     const sampleCsv = path.join(process.cwd(), 'sample-data', 'bulk_po_csv-3672559.csv');
     const fileInput = page.locator('input[type="file"]');
@@ -102,11 +105,12 @@ test.describe('Aksharveda Dashboard End-to-End Suite', () => {
       data: {
         action: 'upsert_test_po',
         po_number: TEST_PO_NUMBER,
+        hub: 'delhi',
       }
     }).catch(() => null);
 
     try {
-      await page.goto(`${BASE_URL}/planning?search=${TEST_PO_NUMBER}`);
+      await page.goto(`${BASE_URL}/planning?hub=delhi&search=${TEST_PO_NUMBER}`);
       await expect(page.locator('h1')).toContainText('Dispatch Planning Sheet');
 
       // Wait for matrix row for our isolated test PO
@@ -135,6 +139,7 @@ test.describe('Aksharveda Dashboard End-to-End Suite', () => {
         data: {
           action: 'delete_test_po',
           po_number: TEST_PO_NUMBER,
+          hub: 'delhi',
         }
       });
       if (!cleanupRes.ok()) {
@@ -145,6 +150,9 @@ test.describe('Aksharveda Dashboard End-to-End Suite', () => {
 
   test('4. Upload modified CSV with rejected rows and verify diff preview', async ({ page }) => {
     await page.goto(`${BASE_URL}/upload`);
+
+    // Select Delhi Hub
+    await page.click('button:has-text("Delhi Hub")');
 
     const badRowsCsv = path.join(process.cwd(), 'test-data', 'bad_rows.csv');
     await page.locator('input[type="file"]').setInputFiles(badRowsCsv);

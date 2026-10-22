@@ -185,17 +185,17 @@ export function generateUploadPreview(
   const nearExpiryDays = (store.settings.near_expiry_days as number) || 7;
   const existingHeadersMap = new Map<string, POHeader>();
   store.po_header.forEach((h) => {
-    existingHeadersMap.set(`${h.channel_id}:${h.po_number}`, h);
+    existingHeadersMap.set(`${h.channel_id}:${h.hub}:${h.po_number}`, h);
   });
 
   const existingLinesMap = new Map<string, POLine>();
   store.po_line.forEach((l) => {
-    existingLinesMap.set(`${l.channel_id}:${l.po_number}:${l.item_id}`, l);
+    existingLinesMap.set(`${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`, l);
   });
 
   const rowMap = new Map<string, CleanedBlinkitRow[]>();
   cleanedRows.forEach((row) => {
-    const key = `${row.channel_id}:${row.po_number}`;
+    const key = `${row.channel_id}:${row.hub}:${row.po_number}`;
     if (!rowMap.has(key)) {
       rowMap.set(key, []);
     }
@@ -253,7 +253,7 @@ export function generateUploadPreview(
 
       // 2. Line checks: item_id, units_ordered, total_grn_quantity, remaining_quantity + rates
       lines.forEach((l) => {
-        const lineKey = `${l.channel_id}:${l.po_number}:${l.item_id}`;
+        const lineKey = `${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`;
         const exLine = existingLinesMap.get(lineKey);
         if (!exLine) {
           changedFields.add(`new_item_${l.item_id}`);
@@ -271,7 +271,7 @@ export function generateUploadPreview(
 
       // Compute merged header totals to see if total_qty or total_amount changed
       const existingPoLines = store.po_line.filter(
-        (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+        (l) => l.channel_id === first.channel_id && l.hub === first.hub && l.po_number === first.po_number
       );
       const incomingByItem = new Map<string, CleanedBlinkitRow>();
       lines.forEach((l) => incomingByItem.set(l.item_id, l));
@@ -309,9 +309,11 @@ export function generateUploadPreview(
 
   const totalUnits = cleanedRows.reduce((acc, cur) => acc + cur.units_ordered, 0);
   const totalAmount = cleanedRows.reduce((acc, cur) => acc + cur.total_amount, 0);
+  const hub = cleanedRows[0]?.hub || "delhi";
 
   return {
     file_name: fileName,
+    hub,
     rows_total: cleanedRows.length + rejectedRows.length,
     rows_valid: cleanedRows.length,
     rows_rejected: rejectedRows.length,
@@ -353,7 +355,7 @@ export async function commitUploadTransaction(
   // Group rows by PO
   const poMap = new Map<string, CleanedBlinkitRow[]>();
   cleanedRows.forEach((r) => {
-    const key = `${r.channel_id}:${r.po_number}`;
+    const key = `${r.channel_id}:${r.hub}:${r.po_number}`;
     if (!poMap.has(key)) poMap.set(key, []);
     poMap.get(key)!.push(r);
   });
@@ -388,13 +390,13 @@ export async function commitUploadTransaction(
 
   // Existing maps
   const headerMap = new Map<string, POHeader>();
-  store.po_header.forEach((h) => headerMap.set(`${h.channel_id}:${h.po_number}`, h));
+  store.po_header.forEach((h) => headerMap.set(`${h.channel_id}:${h.hub}:${h.po_number}`, h));
 
   const planMap = new Map<string, POPlan>();
-  store.po_plan.forEach((p) => planMap.set(`${p.channel_id}:${p.po_number}`, p));
+  store.po_plan.forEach((p) => planMap.set(`${p.channel_id}:${p.hub}:${p.po_number}`, p));
 
   const lineMap = new Map<string, POLine>();
-  store.po_line.forEach((l) => lineMap.set(`${l.channel_id}:${l.po_number}:${l.item_id}`, l));
+  store.po_line.forEach((l) => lineMap.set(`${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`, l));
 
   // 2. Process each PO
   poMap.forEach((lines, poKey) => {
@@ -403,7 +405,7 @@ export async function commitUploadTransaction(
 
     // Compute merged lines for this PO
     const existingPoLines = store.po_line.filter(
-      (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+      (l) => l.channel_id === first.channel_id && l.hub === first.hub && l.po_number === first.po_number
     );
     let totalQty = 0;
     let totalAmount = 0;
@@ -428,6 +430,7 @@ export async function commitUploadTransaction(
         store.po_state_history.push({
           id: crypto.randomUUID(),
           channel_id: first.channel_id,
+          hub: first.hub,
           po_number: first.po_number,
           old_state: existingHeader.po_state,
           new_state: first.po_state,
@@ -456,6 +459,7 @@ export async function commitUploadTransaction(
       // Brand new PO header
       headerMap.set(poKey, {
         channel_id: first.channel_id,
+        hub: first.hub,
         po_number: first.po_number,
         facility_raw: first.facility_raw,
         city: first.city,
@@ -477,6 +481,7 @@ export async function commitUploadTransaction(
       // Insert empty PO Plan ONLY for new PO
       planMap.set(poKey, {
         channel_id: first.channel_id,
+        hub: first.hub,
         po_number: first.po_number,
         remarks: "",
         central_appointment_date: null,
@@ -489,9 +494,10 @@ export async function commitUploadTransaction(
 
     // 3. Upsert PO Lines (Blinkit-owned)
     lines.forEach((line) => {
-      const lineKey = `${line.channel_id}:${line.po_number}:${line.item_id}`;
+      const lineKey = `${line.channel_id}:${line.hub}:${line.po_number}:${line.item_id}`;
       lineMap.set(lineKey, {
         channel_id: line.channel_id,
+        hub: line.hub,
         po_number: line.po_number,
         item_id: line.item_id,
         units_ordered: line.units_ordered,
@@ -514,6 +520,7 @@ export async function commitUploadTransaction(
   const uploadLogEntry: UploadLog = {
     id: uploadId,
     channel_id: "blinkit",
+    hub: preview.hub,
     file_name: fileName,
     uploaded_by: uploadedBy,
     uploaded_at: nowIso,

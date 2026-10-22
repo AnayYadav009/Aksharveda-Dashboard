@@ -67,6 +67,22 @@ export default function UploadsHistoryPage() {
       ),
     },
     {
+      key: 'hub',
+      header: 'Hub',
+      sortable: true,
+      render: (item) => (
+        <span
+          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+            item.hub === 'kolkata'
+              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+              : 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] border border-[var(--accent-teal)]/20'
+          }`}
+        >
+          {item.hub || 'delhi'}
+        </span>
+      ),
+    },
+    {
       key: 'uploaded_by',
       header: 'Uploaded By',
       sortable: true,

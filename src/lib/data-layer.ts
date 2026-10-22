@@ -12,6 +12,7 @@ import {
   InAppNotification,
   UploadPreview,
   RejectedRow,
+  Hub,
 } from "./types";
 import { calculateDaysToExpiry } from "./parser";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
@@ -151,6 +152,7 @@ async function fetchAllRows<T>(table: string, columns = "*", orderBy?: { column:
  * 1. DASHBOARD: Fetch POs and Top Summary
  */
 export async function getDashboardData(options: {
+  hub?: Hub;
   view?: string;
   month?: string | null;
   days?: number;
@@ -174,6 +176,7 @@ export async function getDashboardData(options: {
   const paginate = options.paginate ?? true;
   const sortKey = options.sortKey || "order_date";
   const sortDir = options.sortDir || "desc";
+  const hub = options.hub;
 
   let headers: POHeader[] = [];
   let nearExpiryDays = 7;
@@ -190,6 +193,11 @@ export async function getDashboardData(options: {
     const store = loadStore();
     headers = [...store.po_header];
     nearExpiryDays = (store.settings?.near_expiry_days as number) || 7;
+  }
+
+  // Filter by hub
+  if (hub) {
+    headers = headers.filter((h) => h.hub === hub);
   }
 
   // Filter by search, city, state
@@ -295,17 +303,29 @@ export async function getDashboardData(options: {
 /**
  * 2. PO DETAIL: Fetch single PO drawer info
  */
-export async function getPODetail(poNumber: string) {
+export async function getPODetail(poNumber: string, hub?: Hub) {
   const status = await getDataAdapterStatus();
 
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
+    let headerQuery = supabase.from("po_header").select("*").eq("po_number", poNumber);
+    let linesQuery = supabase.from("po_line").select("*").eq("po_number", poNumber);
+    let planQuery = supabase.from("po_plan").select("*").eq("po_number", poNumber);
+    let histQuery = supabase.from("po_state_history").select("*").eq("po_number", poNumber).order("changed_at", { ascending: false });
+
+    if (hub) {
+      headerQuery = headerQuery.eq("hub", hub);
+      linesQuery = linesQuery.eq("hub", hub);
+      planQuery = planQuery.eq("hub", hub);
+      histQuery = histQuery.eq("hub", hub);
+    }
+
     const [headerRes, linesRes, skusList, planRes, histRes] = await Promise.all([
-      supabase.from("po_header").select("*").eq("po_number", poNumber).maybeSingle(),
-      supabase.from("po_line").select("*").eq("po_number", poNumber),
+      headerQuery.maybeSingle(),
+      linesQuery,
       fetchAllRows<SKUMaster>("sku_master"),
-      supabase.from("po_plan").select("*").eq("po_number", poNumber).maybeSingle(),
-      supabase.from("po_state_history").select("*").eq("po_number", poNumber).order("changed_at", { ascending: false }),
+      planQuery.maybeSingle(),
+      histQuery,
     ]);
 
     if (!headerRes.data) return null;
@@ -333,11 +353,13 @@ export async function getPODetail(poNumber: string) {
     };
   } else {
     const store = loadStore();
-    const header = store.po_header.find((h) => h.po_number === poNumber);
+    const header = store.po_header.find((h) => h.po_number === poNumber && (hub ? h.hub === hub : true));
     if (!header) return null;
 
+    const targetHub = header.hub;
+
     const lines = store.po_line
-      .filter((l) => l.po_number === poNumber)
+      .filter((l) => l.po_number === poNumber && l.hub === targetHub)
       .map((l) => {
         const sku = store.sku_master.find((s) => s.item_id === l.item_id);
         return {
@@ -349,9 +371,9 @@ export async function getPODetail(poNumber: string) {
         };
       });
 
-    const plan = store.po_plan.find((p) => p.po_number === poNumber) || null;
+    const plan = store.po_plan.find((p) => p.po_number === poNumber && p.hub === targetHub) || null;
     const stateHistory = store.po_state_history
-      .filter((h) => h.po_number === poNumber)
+      .filter((h) => h.po_number === poNumber && h.hub === targetHub)
       .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
 
     return { header, lines, plan, stateHistory, state_history: stateHistory };
@@ -361,7 +383,7 @@ export async function getPODetail(poNumber: string) {
 /**
  * 3. PLANNING SHEET: Fetch Matrix Data
  */
-export async function getPlanningGrid(options: { hideClosed: boolean; city?: string; state?: string }) {
+export async function getPlanningGrid(options: { hideClosed: boolean; city?: string; state?: string; hub?: Hub }) {
   const status = await getDataAdapterStatus();
   let headers: POHeader[] = [];
   let lines: POLine[] = [];
@@ -395,6 +417,14 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
     dispatches = [...store.po_line_dispatch];
   }
 
+  // Filter by hub
+  if (options.hub) {
+    headers = headers.filter((h) => h.hub === options.hub);
+    lines = lines.filter((l) => l.hub === options.hub);
+    plans = plans.filter((p) => p.hub === options.hub);
+    dispatches = dispatches.filter((d) => d.hub === options.hub);
+  }
+
   // Filter headers
   if (options.hideClosed) {
     headers = headers.filter((h) => h.po_state !== "Fulfilled" && h.po_state !== "Expired");
@@ -402,15 +432,15 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
   if (options.city) headers = headers.filter((h) => h.city === options.city);
   if (options.state) headers = headers.filter((h) => h.po_state === options.state);
 
-  const activePoNumbers = new Set(headers.map((h) => h.po_number));
-  const activeLines = lines.filter((l) => activePoNumbers.has(l.po_number));
+  const activePoKeys = new Set(headers.map((h) => `${h.channel_id}:${h.hub}:${h.po_number}`));
+  const activeLines = lines.filter((l) => activePoKeys.has(`${l.channel_id}:${l.hub}:${l.po_number}`));
   const activeSkuIds = Array.from(new Set(activeLines.map((l) => l.item_id)));
 
   // Open order calculations (Unscheduled, Scheduled, Partially Scheduled)
-  const openPoNumbers = new Set(
+  const openPoKeys = new Set(
     headers
       .filter((h) => ["Unscheduled", "Scheduled", "Partially Scheduled"].includes(h.po_state))
-      .map((h) => h.po_number)
+      .map((h) => `${h.channel_id}:${h.hub}:${h.po_number}`)
   );
 
   // Store known stock values. If not in stock_snapshot, stock is unknown (null)
@@ -419,7 +449,8 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
 
   const openQtyMap = new Map<string, number>();
   lines.forEach((l) => {
-    if (openPoNumbers.has(l.po_number)) {
+    const key = `${l.channel_id}:${l.hub}:${l.po_number}`;
+    if (openPoKeys.has(key)) {
       openQtyMap.set(l.item_id, (openQtyMap.get(l.item_id) || 0) + l.units_ordered);
     }
   });
@@ -448,23 +479,27 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
 
   const lineQtyMap: Record<string, Record<string, number>> = {};
   activeLines.forEach((l) => {
-    if (!lineQtyMap[l.po_number]) lineQtyMap[l.po_number] = {};
-    lineQtyMap[l.po_number][l.item_id] = l.units_ordered;
+    const key = `${l.channel_id}:${l.hub}:${l.po_number}`;
+    if (!lineQtyMap[key]) lineQtyMap[key] = {};
+    lineQtyMap[key][l.item_id] = l.units_ordered;
   });
 
   const planMap = new Map<string, POPlan>();
-  plans.forEach((p) => planMap.set(p.po_number, p));
+  plans.forEach((p) => planMap.set(`${p.channel_id}:${p.hub}:${p.po_number}`, p));
 
   const dispatchMap: Record<string, number> = {};
   dispatches.forEach((d) => {
-    dispatchMap[d.po_number] = (dispatchMap[d.po_number] || 0) + d.qty_dispatched;
+    const key = `${d.channel_id}:${d.hub}:${d.po_number}`;
+    dispatchMap[key] = (dispatchMap[key] || 0) + d.qty_dispatched;
   });
 
   const rows = headers.map((h) => {
-    const plan = planMap.get(h.po_number);
+    const key = `${h.channel_id}:${h.hub}:${h.po_number}`;
+    const plan = planMap.get(key);
     const daysToExpiry = calculateDaysToExpiry(h.expiry_date);
     return {
       channel_id: h.channel_id,
+      hub: h.hub,
       channel_name: "Blinkit",
       po_number: h.po_number,
       facility_raw: h.facility_raw,
@@ -480,8 +515,8 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
       central_appointment_date: plan?.central_appointment_date || "",
       internal_dispatch_date: plan?.internal_dispatch_date || "",
       actual_dispatch_date: plan?.actual_dispatch_date || "",
-      qty_dispatched: dispatchMap[h.po_number] || 0,
-      sku_quantities: lineQtyMap[h.po_number] || {},
+      qty_dispatched: dispatchMap[key] || 0,
+      sku_quantities: lineQtyMap[key] || {},
     };
   });
 
@@ -496,6 +531,7 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
  */
 export async function updatePlanningRow(body: {
   po_number: string;
+  hub?: Hub;
   remarks?: string;
   central_appointment_date?: string | null;
   internal_dispatch_date?: string | null;
@@ -513,10 +549,21 @@ export async function updatePlanningRow(body: {
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
 
+    // Resolve hub from po_header if not provided
+    let targetHub: Hub = body.hub || "delhi";
+    if (!body.hub) {
+      const { data: h } = await supabase.from("po_header").select("hub").eq("po_number", po_number).maybeSingle();
+      if (h?.hub) targetHub = h.hub as Hub;
+    }
+
     // 1. Upsert po_plan
-    const { data: existingPlan } = await supabase.from("po_plan").select("*").eq("po_number", po_number).maybeSingle();
+    let planQuery = supabase.from("po_plan").select("*").eq("po_number", po_number);
+    if (targetHub) planQuery = planQuery.eq("hub", targetHub);
+    const { data: existingPlan } = await planQuery.maybeSingle();
+
     const planPayload: POPlan = {
       channel_id: "blinkit",
+      hub: targetHub,
       po_number,
       remarks: remarks !== undefined ? remarks : existingPlan?.remarks || "",
       central_appointment_date: central_appointment_date !== undefined ? central_appointment_date : existingPlan?.central_appointment_date || null,
@@ -525,32 +572,35 @@ export async function updatePlanningRow(body: {
       updated_at: nowIso,
       updated_by,
     };
-    await supabase.from("po_plan").upsert(planPayload, { onConflict: "channel_id,po_number" });
+    await supabase.from("po_plan").upsert(planPayload, { onConflict: "channel_id,hub,po_number" });
 
     // 2. Upsert po_line_dispatch if provided
     if (qty_dispatched !== undefined) {
       let targetItemId = item_id;
       if (!targetItemId) {
         // Find first line item for this PO
-        const { data: lineRow } = await supabase.from("po_line").select("item_id").eq("po_number", po_number).limit(1).maybeSingle();
+        let lineQuery = supabase.from("po_line").select("item_id").eq("po_number", po_number);
+        if (targetHub) lineQuery = lineQuery.eq("hub", targetHub);
+        const { data: lineRow } = await lineQuery.limit(1).maybeSingle();
         targetItemId = lineRow?.item_id;
       }
       if (targetItemId) {
         await supabase.from("po_line_dispatch").upsert({
           channel_id: "blinkit",
+          hub: targetHub,
           po_number,
           item_id: targetItemId,
           qty_dispatched: Number(qty_dispatched) || 0,
           updated_at: nowIso,
           updated_by,
-        }, { onConflict: "channel_id,po_number,item_id" });
+        }, { onConflict: "channel_id,hub,po_number,item_id" });
       }
     }
 
     // Also mirror to local store for offline consistency
     try {
       const store = loadStore();
-      let plan = store.po_plan.find((p) => p.po_number === po_number);
+      let plan = store.po_plan.find((p) => p.po_number === po_number && (targetHub ? p.hub === targetHub : true));
       if (!plan) {
         store.po_plan.push(planPayload);
       } else {
@@ -562,11 +612,12 @@ export async function updatePlanningRow(body: {
         plan.updated_by = updated_by;
       }
       if (qty_dispatched !== undefined) {
-        const targetItemId = item_id || store.po_line.find((l) => l.po_number === po_number)?.item_id || "total_summary";
-        let dispatch = store.po_line_dispatch.find((d) => d.po_number === po_number && (item_id ? d.item_id === item_id : true));
+        const targetItemId = item_id || store.po_line.find((l) => l.po_number === po_number && (targetHub ? l.hub === targetHub : true))?.item_id || "total_summary";
+        let dispatch = store.po_line_dispatch.find((d) => d.po_number === po_number && (targetHub ? d.hub === targetHub : true) && (item_id ? d.item_id === item_id : true));
         if (!dispatch) {
           store.po_line_dispatch.push({
             channel_id: "blinkit",
+            hub: targetHub,
             po_number,
             item_id: targetItemId,
             qty_dispatched: Number(qty_dispatched) || 0,
@@ -588,10 +639,12 @@ export async function updatePlanningRow(body: {
     return { success: true, plan: planPayload };
   } else {
     const store = loadStore();
-    let plan = store.po_plan.find((p) => p.po_number === po_number);
+    const resolvedHub = body.hub || store.po_header.find((h) => h.po_number === po_number)?.hub || "delhi";
+    let plan = store.po_plan.find((p) => p.po_number === po_number && p.hub === resolvedHub);
     if (!plan) {
       plan = {
         channel_id: "blinkit",
+        hub: resolvedHub,
         po_number,
         remarks: remarks || "",
         central_appointment_date: central_appointment_date || null,
@@ -611,11 +664,12 @@ export async function updatePlanningRow(body: {
     }
 
     if (qty_dispatched !== undefined) {
-      const targetItemId = item_id || store.po_line.find((l) => l.po_number === po_number)?.item_id || "total_summary";
-      let dispatch = store.po_line_dispatch.find((d) => d.po_number === po_number && (item_id ? d.item_id === item_id : true));
+      const targetItemId = item_id || store.po_line.find((l) => l.po_number === po_number && l.hub === resolvedHub)?.item_id || "total_summary";
+      let dispatch = store.po_line_dispatch.find((d) => d.po_number === po_number && d.hub === resolvedHub && (item_id ? d.item_id === item_id : true));
       if (!dispatch) {
         store.po_line_dispatch.push({
           channel_id: "blinkit",
+          hub: resolvedHub,
           po_number,
           item_id: targetItemId,
           qty_dispatched: Number(qty_dispatched) || 0,
@@ -658,15 +712,15 @@ export async function generateUploadPreview(
   }
 
   const existingHeadersMap = new Map<string, POHeader>();
-  existingHeaders.forEach((h) => existingHeadersMap.set(`${h.channel_id}:${h.po_number}`, h));
+  existingHeaders.forEach((h) => existingHeadersMap.set(`${h.channel_id}:${h.hub}:${h.po_number}`, h));
 
   const existingLinesMap = new Map<string, POLine>();
-  existingLines.forEach((l) => existingLinesMap.set(`${l.channel_id}:${l.po_number}:${l.item_id}`, l));
+  existingLines.forEach((l) => existingLinesMap.set(`${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`, l));
 
   // Group upload rows by PO
   const rowMap = new Map<string, CleanedBlinkitRow[]>();
   cleanedRows.forEach((row) => {
-    const key = `${row.channel_id}:${row.po_number}`;
+    const key = `${row.channel_id}:${row.hub}:${row.po_number}`;
     if (!rowMap.has(key)) rowMap.set(key, []);
     rowMap.get(key)!.push(row);
   });
@@ -712,7 +766,7 @@ export async function generateUploadPreview(
 
       // 2. Compare Line Item fields
       lines.forEach((l) => {
-        const lineKey = `${l.channel_id}:${l.po_number}:${l.item_id}`;
+        const lineKey = `${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`;
         const exLine = existingLinesMap.get(lineKey);
         if (!exLine) {
           changedFields.add(`new_item_${l.item_id}`);
@@ -730,7 +784,7 @@ export async function generateUploadPreview(
 
       // Compute merged header totals
       const existingPoLines = existingLines.filter(
-        (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+        (l) => l.channel_id === first.channel_id && l.hub === first.hub && l.po_number === first.po_number
       );
       let mergedTotalQty = 0;
       let mergedTotalAmount = 0;
@@ -762,9 +816,11 @@ export async function generateUploadPreview(
 
   const totalUnits = cleanedRows.reduce((acc, cur) => acc + cur.units_ordered, 0);
   const totalAmount = cleanedRows.reduce((acc, cur) => acc + cur.total_amount, 0);
+  const hub = cleanedRows[0]?.hub || "delhi";
 
   return {
     file_name: fileName,
+    hub,
     rows_total: cleanedRows.length + rejectedRows.length,
     rows_valid: cleanedRows.length,
     rows_rejected: rejectedRows.length,
@@ -800,7 +856,7 @@ export async function commitUploadTransaction(
   // Group by PO
   const poMap = new Map<string, CleanedBlinkitRow[]>();
   cleanedRows.forEach((r) => {
-    const key = `${r.channel_id}:${r.po_number}`;
+    const key = `${r.channel_id}:${r.hub}:${r.po_number}`;
     if (!poMap.has(key)) poMap.set(key, []);
     poMap.get(key)!.push(r);
   });
@@ -809,15 +865,22 @@ export async function commitUploadTransaction(
     const supabase = getSupabaseClient()!;
 
     // Backup current state for rollback if server-side transaction fails
-    const existingPOs = Array.from(poMap.keys()).map((k) => k.split(":")[1]);
-    const { data: backupHeaders } = await supabase.from("po_header").select("*").in("po_number", existingPOs);
-    const { data: backupLines } = await supabase.from("po_line").select("*").in("po_number", existingPOs);
+    const poEntries = Array.from(poMap.keys()).map((k) => {
+      const parts = k.split(":");
+      return { channel_id: parts[0], hub: parts[1], po_number: parts[2] };
+    });
+    const poNumbers = poEntries.map((e) => e.po_number);
+    const hubs = Array.from(new Set(poEntries.map((e) => e.hub)));
+
+    const { data: backupHeaders } = await supabase.from("po_header").select("*").in("po_number", poNumbers).in("hub", hubs);
+    const { data: backupLines } = await supabase.from("po_line").select("*").in("po_number", poNumbers).in("hub", hubs);
 
     try {
       // 1. Insert upload_log entry
       const { error: logErr } = await supabase.from("upload_log").insert({
         id: uploadId,
         channel_id: "blinkit",
+        hub: preview.hub,
         file_name: fileName,
         uploaded_by: uploadedBy,
         uploaded_at: nowIso,
@@ -857,7 +920,7 @@ export async function commitUploadTransaction(
 
       poMap.forEach((lines, poKey) => {
         const first = lines[0];
-        const ex = backupHeaders?.find((h) => h.po_number === first.po_number);
+        const ex = backupHeaders?.find((h) => h.po_number === first.po_number && h.hub === first.hub);
 
         // Compute merged totals (existing lines for this PO not in incoming + incoming lines)
         let totalQty = 0;
@@ -871,7 +934,7 @@ export async function commitUploadTransaction(
         });
 
         if (ex) {
-          const exPoLines = (backupLines || []).filter((l) => l.po_number === first.po_number);
+          const exPoLines = (backupLines || []).filter((l) => l.po_number === first.po_number && l.hub === first.hub);
           exPoLines.forEach((l) => {
             if (!incomingItemIds.has(l.item_id)) {
               totalQty += l.units_ordered;
@@ -883,6 +946,7 @@ export async function commitUploadTransaction(
             stateHistoryToInsert.push({
               id: crypto.randomUUID(),
               channel_id: first.channel_id,
+              hub: first.hub,
               po_number: first.po_number,
               old_state: ex.po_state,
               new_state: first.po_state,
@@ -908,6 +972,7 @@ export async function commitUploadTransaction(
         } else {
           const newHeader: POHeader = {
             channel_id: first.channel_id,
+            hub: first.hub,
             po_number: first.po_number,
             facility_raw: first.facility_raw,
             city: first.city,
@@ -929,6 +994,7 @@ export async function commitUploadTransaction(
           newHeadersCreated.push(newHeader);
           plansToInsert.push({
             channel_id: first.channel_id,
+            hub: first.hub,
             po_number: first.po_number,
             remarks: "",
             central_appointment_date: null,
@@ -940,7 +1006,7 @@ export async function commitUploadTransaction(
         }
       });
 
-      await mustUpsert(supabase, "po_header", headersToUpsert as unknown as Record<string, unknown>[], "channel_id,po_number");
+      await mustUpsert(supabase, "po_header", headersToUpsert as unknown as Record<string, unknown>[], "channel_id,hub,po_number");
 
       // ATOMICITY SIMULATION TEST: Throw error if requested
       if (forceErrorAfterHeader) {
@@ -950,6 +1016,7 @@ export async function commitUploadTransaction(
       // 4. Upsert PO Lines in batches of 500
       const linesToUpsert: POLine[] = cleanedRows.map((line) => ({
         channel_id: line.channel_id,
+        hub: line.hub,
         po_number: line.po_number,
         item_id: line.item_id,
         units_ordered: line.units_ordered,
@@ -962,7 +1029,7 @@ export async function commitUploadTransaction(
         total_amount: line.total_amount,
       }));
 
-      await mustUpsert(supabase, "po_line", linesToUpsert as unknown as Record<string, unknown>[], "channel_id,po_number,item_id");
+      await mustUpsert(supabase, "po_line", linesToUpsert as unknown as Record<string, unknown>[], "channel_id,hub,po_number,item_id");
 
       // 5. Insert Plans for new POs (never overwriting team data)
       if (plansToInsert.length > 0) {
@@ -985,8 +1052,18 @@ export async function commitUploadTransaction(
       // Sync local store as mirror cache
       const store = loadStore();
       store.sku_master = Array.from(skuMap.values());
-      store.po_header = headersToUpsert;
-      store.po_line = linesToUpsert;
+      // Merge headersToUpsert into store.po_header
+      const hMap = new Map<string, POHeader>();
+      store.po_header.forEach((h) => hMap.set(`${h.channel_id}:${h.hub}:${h.po_number}`, h));
+      headersToUpsert.forEach((h) => hMap.set(`${h.channel_id}:${h.hub}:${h.po_number}`, h));
+      store.po_header = Array.from(hMap.values());
+
+      // Merge linesToUpsert into store.po_line
+      const lMap = new Map<string, POLine>();
+      store.po_line.forEach((l) => lMap.set(`${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`, l));
+      linesToUpsert.forEach((l) => lMap.set(`${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`, l));
+      store.po_line = Array.from(lMap.values());
+
       if (plansToInsert.length > 0) {
         store.po_plan.push(...plansToInsert);
       }
@@ -996,6 +1073,7 @@ export async function commitUploadTransaction(
       store.upload_log.unshift({
         id: uploadId,
         channel_id: "blinkit",
+        hub: preview.hub,
         file_name: fileName,
         uploaded_by: uploadedBy,
         uploaded_at: nowIso,
@@ -1029,20 +1107,20 @@ export async function commitUploadTransaction(
       // ROLLBACK: Purge all newly added records for this upload
       console.error("[TRANSACTION ROLLBACK] Error occurred during commit, rolling back changes:", err);
 
-      // 1. Delete lines for newly added POs
+      // Delete lines for newly added POs for this hub
       const newPoNumbers = Array.from(poMap.keys())
-        .map((k) => k.split(":")[1])
-        .filter((pn) => !backupHeaders?.some((b) => b.po_number === pn));
+        .filter((k) => !backupHeaders?.some((b) => `${b.channel_id}:${b.hub}:${b.po_number}` === k))
+        .map((k) => k.split(":")[2]);
 
       if (newPoNumbers.length > 0) {
-        await supabase.from("po_line").delete().in("po_number", newPoNumbers);
-        await supabase.from("po_plan").delete().in("po_number", newPoNumbers);
-        await supabase.from("po_header").delete().in("po_number", newPoNumbers);
+        await supabase.from("po_line").delete().in("po_number", newPoNumbers).in("hub", hubs);
+        await supabase.from("po_plan").delete().in("po_number", newPoNumbers).in("hub", hubs);
+        await supabase.from("po_header").delete().in("po_number", newPoNumbers).in("hub", hubs);
       }
 
       // 2. Restore previous headers
       if (backupHeaders && backupHeaders.length > 0) {
-        await supabase.from("po_header").upsert(backupHeaders, { onConflict: "channel_id,po_number" });
+        await supabase.from("po_header").upsert(backupHeaders, { onConflict: "channel_id,hub,po_number" });
       }
 
       // 3. Delete upload_log entry
@@ -1083,13 +1161,13 @@ async function commitUploadFallback(
 ) {
   // Existing maps
   const headerMap = new Map<string, POHeader>();
-  store.po_header.forEach((h) => headerMap.set(`${h.channel_id}:${h.po_number}`, h));
+  store.po_header.forEach((h) => headerMap.set(`${h.channel_id}:${h.hub}:${h.po_number}`, h));
 
   const planMap = new Map<string, POPlan>();
-  store.po_plan.forEach((p) => planMap.set(`${p.channel_id}:${p.po_number}`, p));
+  store.po_plan.forEach((p) => planMap.set(`${p.channel_id}:${p.hub}:${p.po_number}`, p));
 
   const lineMap = new Map<string, POLine>();
-  store.po_line.forEach((l) => lineMap.set(`${l.channel_id}:${l.po_number}:${l.item_id}`, l));
+  store.po_line.forEach((l) => lineMap.set(`${l.channel_id}:${l.hub}:${l.po_number}:${l.item_id}`, l));
 
   const skuMap = new Map<string, SKUMaster>();
   store.sku_master.forEach((s) => skuMap.set(s.item_id, s));
@@ -1110,7 +1188,7 @@ async function commitUploadFallback(
 
   const poMap = new Map<string, CleanedBlinkitRow[]>();
   cleanedRows.forEach((r) => {
-    const key = `${r.channel_id}:${r.po_number}`;
+    const key = `${r.channel_id}:${r.hub}:${r.po_number}`;
     if (!poMap.has(key)) poMap.set(key, []);
     poMap.get(key)!.push(r);
   });
@@ -1121,7 +1199,7 @@ async function commitUploadFallback(
 
     // Compute merged totals
     const existingPoLines = store.po_line.filter(
-      (l) => l.channel_id === first.channel_id && l.po_number === first.po_number
+      (l) => l.channel_id === first.channel_id && l.hub === first.hub && l.po_number === first.po_number
     );
     let totalQty = 0;
     let totalAmount = 0;
@@ -1145,6 +1223,7 @@ async function commitUploadFallback(
         store.po_state_history.push({
           id: crypto.randomUUID(),
           channel_id: first.channel_id,
+          hub: first.hub,
           po_number: first.po_number,
           old_state: existingHeader.po_state,
           new_state: first.po_state,
@@ -1170,6 +1249,7 @@ async function commitUploadFallback(
     } else {
       headerMap.set(poKey, {
         channel_id: first.channel_id,
+        hub: first.hub,
         po_number: first.po_number,
         facility_raw: first.facility_raw,
         city: first.city,
@@ -1189,6 +1269,7 @@ async function commitUploadFallback(
       });
       planMap.set(poKey, {
         channel_id: first.channel_id,
+        hub: first.hub,
         po_number: first.po_number,
         remarks: "",
         central_appointment_date: null,
@@ -1200,9 +1281,10 @@ async function commitUploadFallback(
     }
 
     lines.forEach((line) => {
-      const lineKey = `${line.channel_id}:${line.po_number}:${line.item_id}`;
+      const lineKey = `${line.channel_id}:${line.hub}:${line.po_number}:${line.item_id}`;
       lineMap.set(lineKey, {
         channel_id: line.channel_id,
+        hub: line.hub,
         po_number: line.po_number,
         item_id: line.item_id,
         units_ordered: line.units_ordered,
@@ -1224,6 +1306,7 @@ async function commitUploadFallback(
   store.upload_log.unshift({
     id: uploadId,
     channel_id: "blinkit",
+    hub: preview.hub,
     file_name: fileName,
     uploaded_by: uploadedBy,
     uploaded_at: nowIso,
@@ -1402,13 +1485,14 @@ export async function markNotificationsRead() {
 /**
  * 9. UPLOAD LOGS
  */
-export async function getUploadLogs(): Promise<UploadLog[]> {
+export async function getUploadLogs(hub?: Hub): Promise<UploadLog[]> {
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
     const data = await fetchAllRows<any>("upload_log", "*", { column: "uploaded_at", ascending: false });
-    return (data || []).map((d) => ({
+    const mapped: UploadLog[] = (data || []).map((d) => ({
       id: d.id,
       channel_id: d.channel_id,
+      hub: d.hub || "delhi",
       file_name: d.file_name,
       uploaded_by: d.uploaded_by,
       uploaded_at: d.uploaded_at,
@@ -1422,8 +1506,10 @@ export async function getUploadLogs(): Promise<UploadLog[]> {
       total_units: d.total_units || d.error_report?.total_units || 0,
       total_amount: d.total_amount || d.error_report?.total_amount || 0,
     }));
+    return hub ? mapped.filter((m) => m.hub === hub) : mapped;
   } else {
-    return loadStore().upload_log;
+    const logs = loadStore().upload_log;
+    return hub ? logs.filter((l) => l.hub === hub) : logs;
   }
 }
 
@@ -1453,7 +1539,7 @@ export async function updateSKUShortName(itemId: string, shortName: string) {
 /**
  * 11. E2E TEST PO ISOLATION (Guarantees zero mutation to live PO rows)
  */
-export async function upsertTestPO(poNumber: string) {
+export async function upsertTestPO(poNumber: string, hub: Hub = "delhi") {
   if (!poNumber.startsWith("TEST-E2E-")) {
     throw new Error("Invalid test PO number: must start with TEST-E2E-");
   }
@@ -1465,6 +1551,7 @@ export async function upsertTestPO(poNumber: string) {
 
     await supabase.from("po_header").upsert({
       channel_id: "blinkit",
+      hub,
       po_number: poNumber,
       facility_raw: "TEST E2E Facility",
       city: "Bengaluru",
@@ -1474,10 +1561,11 @@ export async function upsertTestPO(poNumber: string) {
       po_state: "Unscheduled",
       total_qty: 10,
       total_amount: 1000,
-    });
+    }, { onConflict: "channel_id,hub,po_number" });
 
     await supabase.from("po_line").upsert({
       channel_id: "blinkit",
+      hub,
       po_number: poNumber,
       item_id: itemId,
       units_ordered: 10,
@@ -1485,17 +1573,18 @@ export async function upsertTestPO(poNumber: string) {
       landing_rate: 100,
       cost_price: 100,
       total_amount: 1000,
-    });
+    }, { onConflict: "channel_id,hub,po_number,item_id" });
 
     invalidateDataCache("table:po_header");
     invalidateDataCache("table:po_line");
     return { success: true, po_number: poNumber };
   } else {
     const store = loadStore();
-    const existing = store.po_header.find((p) => p.po_number === poNumber);
+    const existing = store.po_header.find((p) => p.po_number === poNumber && p.hub === hub);
     if (!existing) {
       store.po_header.push({
         channel_id: "blinkit",
+        hub,
         po_number: poNumber,
         facility_raw: "TEST E2E Facility",
         city: "Bengaluru",
@@ -1513,6 +1602,7 @@ export async function upsertTestPO(poNumber: string) {
       const itemId = store.sku_master[0]?.item_id || "10273355";
       store.po_line.push({
         channel_id: "blinkit",
+        hub,
         po_number: poNumber,
         item_id: itemId,
         units_ordered: 10,
@@ -1532,18 +1622,29 @@ export async function upsertTestPO(poNumber: string) {
   }
 }
 
-export async function deleteTestPO(poNumber: string) {
+export async function deleteTestPO(poNumber: string, hub?: Hub) {
   if (!poNumber.startsWith("TEST-E2E-")) {
     throw new Error("Invalid test PO number: must start with TEST-E2E-");
   }
   const status = await getDataAdapterStatus();
   if (!status.isFallback) {
     const supabase = getSupabaseClient()!;
-    // Cascade delete handles po_line, po_plan, po_line_dispatch
-    const { error: planDelErr } = await supabase.from("po_plan").delete().eq("po_number", poNumber);
-    const { error: dispDelErr } = await supabase.from("po_line_dispatch").delete().eq("po_number", poNumber);
-    const { error: lineDelErr } = await supabase.from("po_line").delete().eq("po_number", poNumber);
-    const { error: headDelErr } = await supabase.from("po_header").delete().eq("po_number", poNumber);
+    let planDel = supabase.from("po_plan").delete().eq("po_number", poNumber);
+    let dispDel = supabase.from("po_line_dispatch").delete().eq("po_number", poNumber);
+    let lineDel = supabase.from("po_line").delete().eq("po_number", poNumber);
+    let headDel = supabase.from("po_header").delete().eq("po_number", poNumber);
+
+    if (hub) {
+      planDel = planDel.eq("hub", hub);
+      dispDel = dispDel.eq("hub", hub);
+      lineDel = lineDel.eq("hub", hub);
+      headDel = headDel.eq("hub", hub);
+    }
+
+    await planDel;
+    await dispDel;
+    await lineDel;
+    const { error: headDelErr } = await headDel;
     if (headDelErr) throw headDelErr;
 
     invalidateDataCache("table:po_header");
@@ -1553,10 +1654,10 @@ export async function deleteTestPO(poNumber: string) {
     return { success: true, po_number: poNumber, deleted: true };
   } else {
     const store = loadStore();
-    store.po_header = store.po_header.filter((p) => p.po_number !== poNumber);
-    store.po_line = store.po_line.filter((l) => l.po_number !== poNumber);
-    store.po_plan = store.po_plan.filter((p) => p.po_number !== poNumber);
-    store.po_line_dispatch = store.po_line_dispatch.filter((d) => d.po_number !== poNumber);
+    store.po_header = store.po_header.filter((p) => p.po_number !== poNumber || (hub && p.hub !== hub));
+    store.po_line = store.po_line.filter((l) => l.po_number !== poNumber || (hub && l.hub !== hub));
+    store.po_plan = store.po_plan.filter((p) => p.po_number !== poNumber || (hub && p.hub !== hub));
+    store.po_line_dispatch = store.po_line_dispatch.filter((d) => d.po_number !== poNumber || (hub && d.hub !== hub));
     saveStore(store);
     invalidateDataCache("table:po_header");
     invalidateDataCache("table:po_line");

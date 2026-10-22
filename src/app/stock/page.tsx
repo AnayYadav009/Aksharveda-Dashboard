@@ -56,7 +56,7 @@ export default function StockPage() {
   const { data, isLoading, isError, error, refetch } = useQuery<{ stock: StockItem[] }>({
     queryKey: ['stock-data'],
     queryFn: async () => {
-      const res = await fetch('/api/stock');
+      const res = await fetch('/api/stock?hub=delhi');
       if (!res.ok) throw new Error('Failed to load stock inventory');
       return res.json();
     },
@@ -75,7 +75,7 @@ export default function StockPage() {
       const res = await fetch('/api/stock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updates }),
+        body: JSON.stringify({ updates, hub: 'delhi' }),
       });
       if (!res.ok) throw new Error('Failed to update stock');
       return res.json();

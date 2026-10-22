@@ -31,6 +31,8 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 
+import { Hub } from '@/lib/types';
+
 interface POItem {
   po_number: string;
   facility_raw: string;
@@ -72,6 +74,8 @@ function PODashboardContent() {
   const searchParams = useSearchParams();
 
   // 1. Read URL state
+  const rawHub = searchParams.get('hub');
+  const hub: Hub = rawHub === 'kolkata' ? 'kolkata' : 'delhi';
   const view = (searchParams.get('view') as 'month' | 'recent') || 'month';
   const urlMonth = searchParams.get('month') || '';
   const urlDays = parseInt(searchParams.get('days') || '30', 10);
@@ -119,15 +123,25 @@ function PODashboardContent() {
         nextParams.set(key, val);
       }
     });
+    // Ensure hub is always set
+    if (!nextParams.has('hub')) {
+      nextParams.set('hub', hub);
+    }
     router.replace(`/pos?${nextParams.toString()}`, { scroll: false });
+  };
+
+  const handleHubChange = (newHub: Hub) => {
+    if (newHub === hub) return;
+    updateQuery({ hub: newHub, page: '1', city: null, state: null });
   };
 
   // 2. Fetch dashboard data using TanStack Query (server-side pagination & sorting)
   const pageSize = 50;
   const { data, isLoading, isError, error, refetch } = useQuery<DashboardApiResponse>({
-    queryKey: ['pos', view, urlMonth, urlDays, urlSearch, urlCity, urlState, urlPage, sortKey, sortDir],
+    queryKey: ['pos', hub, view, urlMonth, urlDays, urlSearch, urlCity, urlState, urlPage, sortKey, sortDir],
     queryFn: async () => {
       const params = new URLSearchParams({
+        hub,
         view,
         days: urlDays.toString(),
         page: urlPage.toString(),
@@ -155,10 +169,10 @@ function PODashboardContent() {
     isLoading: drawerLoading,
     error: drawerError,
   } = useQuery<PODetailResponse>({
-    queryKey: ['po-detail', selectedPoNumber],
+    queryKey: ['po-detail', hub, selectedPoNumber],
     queryFn: async () => {
       if (!selectedPoNumber) return null as any;
-      const res = await fetch(`/api/pos/${selectedPoNumber}`);
+      const res = await fetch(`/api/pos/${selectedPoNumber}?hub=${hub}`);
       if (!res.ok) throw new Error('Failed to load PO details');
       return res.json();
     },
@@ -299,6 +313,52 @@ function PODashboardContent() {
           { label: 'PO Dashboard' },
         ]}
       />
+
+      {/* Top-Level Hub Switcher Tabs */}
+      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleHubChange('delhi')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
+              hub === 'delhi'
+                ? 'bg-[var(--accent-teal)] text-white shadow-xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+            }`}
+          >
+            <span>Delhi POs</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                hub === 'delhi' ? 'bg-white/20 text-white' : 'bg-[var(--surface-raised)] text-[var(--text-muted)]'
+              }`}
+            >
+              North Hub
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleHubChange('kolkata')}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
+              hub === 'kolkata'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+            }`}
+          >
+            <span>Kolkata POs</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                hub === 'kolkata' ? 'bg-white/20 text-white' : 'bg-[var(--surface-raised)] text-[var(--text-muted)]'
+              }`}
+            >
+              East Hub
+            </span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-[var(--text-muted)] hidden sm:block">
+          Active Hub: <span className="font-semibold uppercase tracking-wider text-[var(--text-primary)]">{hub}</span>
+        </div>
+      </div>
 
       {/* 2. Metrics in one bordered strip */}
       <div className="rounded-[4px] border border-[var(--border-subtle)] bg-[var(--surface-card)] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--border-subtle)] overflow-hidden">

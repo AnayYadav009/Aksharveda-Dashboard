@@ -1,4 +1,4 @@
-import { BlinkitCsvRow, CleanedBlinkitRow, RejectedRow, BlinkitCsvRowSchema } from "./types";
+import { BlinkitCsvRow, CleanedBlinkitRow, RejectedRow, BlinkitCsvRowSchema, Hub } from "./types";
 
 /**
  * Normalizes entity vendor legal name by stripping quotes and uppercasing.
@@ -142,6 +142,7 @@ export function calculateDaysToExpiry(expiryDateStr: string, baseDate?: Date): n
  */
 export function parseAndCleanBlinkitRows(
   rawRows: Array<Record<string, unknown>>,
+  hub: Hub,
   channelId = "blinkit"
 ): {
   validRows: CleanedBlinkitRow[];
@@ -243,6 +244,7 @@ export function parseAndCleanBlinkitRows(
 
     validRows.push({
       channel_id: channelId,
+      hub,
       po_number: data.po_number,
       facility_raw: facility.facility_raw,
       city: facility.city,

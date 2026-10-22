@@ -11,7 +11,7 @@ import {
   ErrorState,
   Skeleton,
 } from '@/components/ui';
-import { UploadPreview, RejectedRow } from '@/lib/types';
+import { UploadPreview, RejectedRow, Hub } from '@/lib/types';
 import { formatINR, formatUnits, formatDate } from '@/lib/format';
 import {
   UploadCloud,
@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Bell,
   ExternalLink,
+  Building2,
 } from 'lucide-react';
 
 const EXPECTED_COLUMNS = [
@@ -64,6 +65,9 @@ const EXPECTED_COLUMNS = [
 
 export default function UploadWizardPage() {
   const router = useRouter();
+
+  // Selected Hub (Required before upload/preview, no default)
+  const [selectedHub, setSelectedHub] = useState<Hub | null>(null);
 
   // Wizard Step: 1 = Choose file, 2 = Validating, 3 = Preview, 4 = Done
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
@@ -141,12 +145,21 @@ export default function UploadWizardPage() {
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
+    if (!selectedHub) {
+      setErrorMsg('Please select a destination hub (Delhi or Kolkata) before uploading.');
+      return;
+    }
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileSelected(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileSelected = (selectedFile: File) => {
+    if (!selectedHub) {
+      setErrorMsg('Please select a destination hub (Delhi or Kolkata) before choosing a file.');
+      return;
+    }
+
     if (!selectedFile.name.endsWith('.csv')) {
       setErrorMsg('Please select a valid CSV file (.csv extension required).');
       return;
@@ -161,10 +174,10 @@ export default function UploadWizardPage() {
 
     // Proceed to Step 2 Validating
     setCurrentStep(2);
-    parseAndValidateFile(selectedFile);
+    parseAndValidateFile(selectedFile, selectedHub);
   };
 
-  const parseAndValidateFile = (fileToParse: File) => {
+  const parseAndValidateFile = (fileToParse: File, hub: Hub) => {
     setIsParsing(true);
     setValidationProgress('Parsing CSV file into records with PapaParse...');
 
@@ -182,6 +195,7 @@ export default function UploadWizardPage() {
             body: JSON.stringify({
               rawRows: results.data,
               fileName: fileToParse.name,
+              hub,
             }),
           });
 
@@ -210,7 +224,7 @@ export default function UploadWizardPage() {
 
   // Commit upload
   const handleConfirmCommit = async () => {
-    if (!preview || validRows.length === 0 || isCommitting) return;
+    if (!preview || validRows.length === 0 || isCommitting || !selectedHub) return;
 
     setIsCommitting(true);
     setErrorMsg(null);
@@ -224,6 +238,7 @@ export default function UploadWizardPage() {
           rejectedRows: preview.rejected_rows,
           fileName: preview.file_name,
           uploadedBy: 'demand_team',
+          hub: selectedHub,
         }),
       });
 
@@ -328,7 +343,83 @@ export default function UploadWizardPage() {
 
       {/* STEP 1: CHOOSE FILE */}
       {currentStep === 1 && (
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* Segmented Control for Hub Selection */}
+          <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] space-y-3 shadow-xs">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-1.5 uppercase tracking-wider">
+                  <Building2 className="w-4 h-4 text-[var(--accent-teal)]" />
+                  Target Fulfillment Hub <span className="text-rose-500">*</span>
+                </label>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  Select the hub fulfilling these purchase orders. Uploads strictly isolate Delhi and Kolkata records.
+                </p>
+              </div>
+              {selectedHub && (
+                <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full capitalize">
+                  {selectedHub} selected
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedHub('delhi');
+                  setErrorMsg(null);
+                }}
+                className={`p-3.5 rounded-lg border text-left transition flex items-center justify-between cursor-pointer ${
+                  selectedHub === 'delhi'
+                    ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/10 text-[var(--text-primary)] ring-2 ring-[var(--accent-teal)]/30'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-ground)] hover:bg-[var(--surface-hover)] text-[var(--text-secondary)]'
+                }`}
+              >
+                <div>
+                  <div className="font-semibold text-sm">Delhi Hub</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mt-0.5">North & Central distribution network</div>
+                </div>
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                    selectedHub === 'delhi'
+                      ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)] text-white'
+                      : 'border-[var(--border-subtle)]'
+                  }`}
+                >
+                  {selectedHub === 'delhi' && <Check className="w-3 h-3 stroke-[3]" />}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedHub('kolkata');
+                  setErrorMsg(null);
+                }}
+                className={`p-3.5 rounded-lg border text-left transition flex items-center justify-between cursor-pointer ${
+                  selectedHub === 'kolkata'
+                    ? 'border-amber-500 bg-amber-500/10 text-[var(--text-primary)] ring-2 ring-amber-500/30'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-ground)] hover:bg-[var(--surface-hover)] text-[var(--text-secondary)]'
+                }`}
+              >
+                <div>
+                  <div className="font-semibold text-sm">Kolkata Hub</div>
+                  <div className="text-[11px] text-[var(--text-muted)] mt-0.5">East & Northeast distribution network</div>
+                </div>
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                    selectedHub === 'kolkata'
+                      ? 'border-amber-500 bg-amber-500 text-white'
+                      : 'border-[var(--border-subtle)]'
+                  }`}
+                >
+                  {selectedHub === 'kolkata' && <Check className="w-3 h-3 stroke-[3]" />}
+                </div>
+              </button>
+            </div>
+          </div>
+
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -336,24 +427,29 @@ export default function UploadWizardPage() {
             }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleFileDrop}
-            className={`relative flex flex-col items-center justify-center rounded-[4px] border-2 border-dashed p-12 text-center transition-all cursor-pointer bg-[var(--surface-card)] ${
-              isDragging
-                ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/5 scale-[1.01]'
-                : 'border-[var(--border-subtle)] hover:border-[var(--accent-teal)]/50 hover:bg-[var(--surface-hover)]'
+            className={`relative flex flex-col items-center justify-center rounded-[4px] border-2 border-dashed p-12 text-center transition-all ${
+              !selectedHub
+                ? 'opacity-60 border-[var(--border-subtle)] bg-[var(--surface-ground)] cursor-not-allowed'
+                : isDragging
+                ? 'border-[var(--accent-teal)] bg-[var(--accent-teal)]/5 scale-[1.01] cursor-pointer'
+                : 'border-[var(--border-subtle)] hover:border-[var(--accent-teal)]/50 hover:bg-[var(--surface-hover)] cursor-pointer'
             }`}
           >
             <input
               type="file"
               accept=".csv"
+              disabled={!selectedHub}
               onChange={(e) => e.target.files?.[0] && handleFileSelected(e.target.files[0])}
-              className="absolute inset-0 opacity-0 cursor-pointer"
+              className={`absolute inset-0 opacity-0 ${selectedHub ? 'cursor-pointer' : 'cursor-not-allowed'}`}
             />
             <div className="w-12 h-12 rounded-[4px] bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] flex items-center justify-center mb-3">
               <UploadCloud className="w-6 h-6" />
             </div>
 
             <p className="text-base font-semibold text-[var(--text-primary)]">
-              Drop your Blinkit PO CSV file here, or click to browse
+              {selectedHub
+                ? `Drop your Blinkit PO CSV file here for ${selectedHub.toUpperCase()} Hub, or click to browse`
+                : 'Select Delhi or Kolkata Hub above to enable file selection'}
             </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
               Accepts CSV files with standard Blinkit bulk export headers (e.g. bulk_po_csv.csv)
@@ -385,7 +481,7 @@ export default function UploadWizardPage() {
           </div>
           <div>
             <h3 className="text-base font-semibold text-[var(--text-primary)]">
-              Validating & Reconciling File
+              Validating & Reconciling File ({selectedHub?.toUpperCase()} Hub)
             </h3>
             <p className="mt-1 text-xs text-[var(--text-muted)] max-w-md mx-auto">
               {validationProgress}
@@ -418,15 +514,26 @@ export default function UploadWizardPage() {
             </div>
           )}
 
-          {/* File summary pill */}
+          {/* File summary pill with Hub Badge */}
           <div className="flex items-center justify-between p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)]">
             <div className="flex items-center gap-2.5">
               <FileText className="w-5 h-5 text-[var(--accent-teal)]" />
               <div>
-                <span className="font-semibold text-sm text-[var(--text-primary)] font-mono">
-                  {preview.file_name}
-                </span>
-                <span className="text-xs text-[var(--text-muted)] ml-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm text-[var(--text-primary)] font-mono">
+                    {preview.file_name}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                      preview.hub === 'kolkata'
+                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                        : 'bg-[var(--accent-teal)]/10 text-[var(--accent-teal)] border border-[var(--accent-teal)]/20'
+                    }`}
+                  >
+                    {preview.hub || selectedHub} Hub
+                  </span>
+                </div>
+                <span className="text-xs text-[var(--text-muted)]">
                   ({file ? (file.size / 1024).toFixed(1) + ' KB • ' : ''}{preview.rows_total.toLocaleString()} rows in CSV)
                 </span>
               </div>

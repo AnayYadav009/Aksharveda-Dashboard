@@ -47,7 +47,7 @@ export default function RecipientsSettingsPage() {
   }>({
     queryKey: ['recipients'],
     queryFn: async () => {
-      const res = await fetch('/api/recipients');
+      const res = await fetch('/api/recipients?hub=delhi');
       if (!res.ok) throw new Error('Failed to load recipients');
       return res.json();
     },
@@ -61,7 +61,7 @@ export default function RecipientsSettingsPage() {
       const res = await fetch('/api/recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, hub: 'delhi' }),
       });
       if (!res.ok) throw new Error('Failed to save recipient');
       return res.json();

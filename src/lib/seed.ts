@@ -32,7 +32,7 @@ export async function runSeed(filePath?: string) {
 
   console.log(`Parsed ${parseResult.data.length} raw CSV rows.`);
 
-  const { validRows, rejectedRows } = parseAndCleanBlinkitRows(parseResult.data);
+  const { validRows, rejectedRows } = parseAndCleanBlinkitRows(parseResult.data, "delhi");
   console.log(`Validation results: ${validRows.length} valid rows, ${rejectedRows.length} rejected rows.`);
 
   const { uploadId, preview } = await commitUploadTransaction(
