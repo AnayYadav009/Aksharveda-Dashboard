@@ -31,7 +31,6 @@ export default function SignupPage() {
         options: {
           data: {
             name: name.trim(),
-            role: 'pending',
           },
         },
       });
@@ -41,13 +40,6 @@ export default function SignupPage() {
       }
 
       if (data.user) {
-        // Upsert/insert profile with role 'pending'
-        await supabase.from('profiles').upsert({
-          user_id: data.user.id,
-          name: name.trim(),
-          role: 'pending',
-        });
-
         setSuccessMsg('Account created successfully. Your access is pending approval.');
         setTimeout(() => {
           router.push('/pending');

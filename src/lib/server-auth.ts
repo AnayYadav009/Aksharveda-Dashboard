@@ -18,9 +18,9 @@ export interface AuthContext {
 export async function authenticateApiRequest(
   req: NextRequest
 ): Promise<NextResponse | AuthContext> {
-  // Check header-based or cookie-based mock/test role for isolated unit testing
+  // Check header-based or cookie-based test role for isolated unit testing
   const testRole = req.headers.get("x-test-role") as UserRole | null;
-  if (testRole) {
+  if (testRole && process.env.NODE_ENV !== "production") {
     if (testRole === "pending") {
       return NextResponse.json(
         { error: "Forbidden: Account pending approval" },
@@ -36,9 +36,9 @@ export async function authenticateApiRequest(
   const isConfigured =
     supabaseUrl &&
     supabaseAnonKey &&
-    !supabaseUrl.includes("mock.supabase.co") &&
+    !supabaseUrl.includes("supabase.invalid") &&
     !supabaseUrl.includes("your-project") &&
-    !supabaseAnonKey.includes("mock-") &&
+    !supabaseAnonKey.includes("invalid-") &&
     !supabaseAnonKey.includes("your-");
 
   if (!isConfigured) {
