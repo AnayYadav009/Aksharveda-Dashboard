@@ -7,9 +7,7 @@ import { commitUploadTransaction, DatabaseStore } from "../src/lib/db";
 
 describe("CSV Reconciliation & Domain Integrity Suite", () => {
   it("reconciles raw CSV sums with store import", async () => {
-    const realCsv = path.join(process.cwd(), "sample-data", "bulk_po_csv-3672559.csv");
-    const anonCsv = path.join(process.cwd(), "sample-data", "sample_po_anonymized.csv");
-    const csvPath = fs.existsSync(realCsv) ? realCsv : anonCsv;
+    const csvPath = path.join(process.cwd(), "test-data", "reconciliation_fixture.csv");
     expect(fs.existsSync(csvPath)).toBe(true);
 
     const rawCsv = fs.readFileSync(csvPath, "utf-8");

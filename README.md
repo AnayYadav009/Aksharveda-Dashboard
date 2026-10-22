@@ -115,13 +115,7 @@ When Supabase is configured:
   - `warehouse`: Dispatch planning sheet management, edit line items, update stock quantities.
   - `management`: Unrestricted access across all analytical views and configuration settings.
 
-### 5. Seed Initial Data
-To populate the database using the sample dataset:
-```bash
-npm run seed
-```
-
-### 6. Start the Development Server
+### 5. Start the Development Server
 ```bash
 npm run dev
 ```
@@ -136,8 +130,6 @@ aksharveda-po-dashboard/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                     # GitHub Actions CI pipeline
-├── sample-data/
-│   └── sample_po_anonymized.csv       # Anonymized reference Blinkit export dataset
 ├── scripts/
 │   └── check-secrets.js               # Pre-commit secret scanning utility
 ├── src/
@@ -166,7 +158,6 @@ aksharveda-po-dashboard/
 │       ├── db.ts                      # Repository & transactional commit logic
 │       ├── format.ts                  # Currency (INR), date (IST), and unit formatters
 │       ├── parser.ts                  # CSV sanitization & quirk correction engine
-│       ├── seed.ts                    # Pipeline seeding script
 │       ├── supabase.ts                # Supabase client helpers
 │       ├── types.ts                   # Domain TypeScript models & Zod schemas
 │       └── notifications/             # Email, WhatsApp, and In-App notification services
@@ -189,7 +180,6 @@ aksharveda-po-dashboard/
 | `npm start` | Runs production Next.js server |
 | `npm run typecheck` | Validates TypeScript types across the entire project |
 | `npm run check:secrets` | Scans codebase for accidentally committed secrets or tokens |
-| `npm run seed` | Seeds database from sample dataset |
 | `npm test` | Runs all Vitest unit and integration test suites |
 | `npm run test:e2e` | Runs Playwright browser end-to-end test suite |
 

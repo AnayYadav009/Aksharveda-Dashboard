@@ -52,33 +52,7 @@ function getInitialStore(): DatabaseStore {
       near_expiry_days: 7,
       default_recent_days: 30,
     },
-    notification_recipients:
-      process.env.NODE_ENV === "production"
-        ? []
-        : [
-            {
-              id: "recip-1",
-              name: "Demand Lead",
-              email: "demand@aksharveda.com",
-              phone: "+919876543210",
-              role: "Demand",
-              channel_prefs: { email: true, whatsapp: true, in_app: true },
-              is_active: true,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-            {
-              id: "recip-2",
-              name: "Warehouse Dispatch",
-              email: "dispatch@aksharveda.com",
-              phone: "+919876543211",
-              role: "Warehouse",
-              channel_prefs: { email: true, whatsapp: true, in_app: true },
-              is_active: true,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            },
-          ],
+    notification_recipients: [],
     in_app_notifications: [],
   };
 }

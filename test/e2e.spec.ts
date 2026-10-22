@@ -42,8 +42,8 @@ test.describe('Aksharveda Dashboard End-to-End Suite', () => {
     // Select Delhi Hub
     await page.click('button:has-text("Delhi Hub")');
 
-    // Upload sample CSV
-    const sampleCsv = path.join(process.cwd(), 'sample-data', 'bulk_po_csv-3672559.csv');
+    // Upload CSV fixture
+    const sampleCsv = path.join(process.cwd(), 'test-data', 'reconciliation_fixture.csv');
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles(sampleCsv);
 

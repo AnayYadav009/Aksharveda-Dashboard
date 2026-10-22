@@ -57,10 +57,8 @@ All notable changes and refactoring phases applied to the Aksharveda Blinkit PO 
   - Implemented real `sendStateChangeAlert` in `EmailNotifier` via Resend API when API key is configured.
 - **Recipient Seeding Protection**: Stopped seeding fake placeholder recipients (`demand@aksharveda.com`, `+919876543210`) in production mode; recipients are loaded strictly via settings UI or database records.
 - **WhatsApp Cloud API Interface**: Isolated `WhatsAppNotifier` behind `IWhatsAppService` interface (`MetaCloudWhatsAppService`) ready for Meta Graph API tokens.
-- **Anonymized Sample Dataset & Hygiene**:
-  - Created anonymized reference CSV at `sample-data/sample_po_anonymized.csv` replacing real vendor names.
-  - Added `sample-data/bulk_po_csv-*.csv` to `.gitignore`.
-  - Updated `README.md` to reference the port 3000, correct clone URLs, proprietary license, all migrations, and new auth workflows.
+- **README & License Hygiene**:
+  - Updated `README.md` to reference port 3000, correct clone URLs, proprietary license, all migrations, and new auth workflows.
   - Replaced MIT license in `LICENSE` with proprietary and confidential notice.
 - **Atomic Local Store Writes**: Updated `saveStore` in `src/lib/db.ts` to write to a temporary file (`store.<uuid>.tmp`) before atomically renaming to `store.json`.
 
