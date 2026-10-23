@@ -83,6 +83,8 @@ export default function LoginPage() {
               <Mail className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="email"
+                spellCheck={false}
+                data-gramm="false"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -100,6 +102,8 @@ export default function LoginPage() {
               <Lock className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="password"
+                spellCheck={false}
+                data-gramm="false"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

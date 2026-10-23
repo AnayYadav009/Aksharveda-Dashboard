@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Boxes,
+  Users,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -36,6 +37,9 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   const pathname = usePathname();
+  const [isManagement, setIsManagement] = useState(false);
+  useEffect(() => { void fetch('/api/auth/status').then(r => r.ok ? r.json() : null).then(data => setIsManagement(data?.role === 'management')).catch(() => setIsManagement(false)); }, []);
+  const navItems = isManagement ? [...NAV_ITEMS, { name: 'Users', href: '/settings/users', icon: Users }] : NAV_ITEMS;
 
   return (
     <aside
@@ -69,7 +73,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 
       {/* Nav List */}
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
           const isActive =
             pathname === item.href ||

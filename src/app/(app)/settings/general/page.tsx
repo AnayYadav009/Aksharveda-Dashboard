@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { PageHeader, SaveStatus, ConfirmDialog } from '@/components/ui';
 import { Sliders, Check, Clock, AlertTriangle, Save } from 'lucide-react';
+import { DatabaseStatusCard } from '@/components/settings/DatabaseStatusCard';
 
 export default function GeneralSettingsPage() {
   const [nearExpiryDays, setNearExpiryDays] = useState(7);
@@ -105,6 +106,8 @@ export default function GeneralSettingsPage() {
           </div>
         </div>
       </div>
+
+      <DatabaseStatusCard />
 
       <ConfirmDialog
         isOpen={confirmOpen}
