@@ -1,6 +1,23 @@
 -- Require hub-specific identity for PO, plan, dispatch and inventory records.
 -- This migration is authored for manual review; it has not been run against a database.
 
+BEGIN;
+
+DO $$
+DECLARE
+  required_table text;
+  missing_tables text[] := ARRAY[]::text[];
+BEGIN
+  FOREACH required_table IN ARRAY ARRAY['channels', 'sku_master', 'upload_log', 'profiles', 'settings', 'notification_recipients', 'in_app_notifications'] LOOP
+    IF to_regclass(format('public.%I', required_table)) IS NULL THEN
+      missing_tables := array_append(missing_tables, required_table);
+    END IF;
+  END LOOP;
+  IF cardinality(missing_tables) > 0 THEN
+    RAISE EXCEPTION 'Run all earlier migrations in order before this one. Missing prerequisite tables: %', array_to_string(missing_tables, ', ');
+  END IF;
+END $$;
+
 ALTER TABLE po_header ADD COLUMN IF NOT EXISTS hub TEXT NOT NULL DEFAULT 'delhi';
 ALTER TABLE po_line ADD COLUMN IF NOT EXISTS hub TEXT NOT NULL DEFAULT 'delhi';
 ALTER TABLE po_plan ADD COLUMN IF NOT EXISTS hub TEXT NOT NULL DEFAULT 'delhi';
@@ -147,3 +164,5 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+COMMIT;
