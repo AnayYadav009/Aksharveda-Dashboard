@@ -28,6 +28,12 @@ const stateConfig: Record<
     label: string;
   }
 > = {
+  UNSCHEDULED: { bg: "bg-[var(--status-warning-bg)]", text: "text-[var(--status-warning-text)]", border: "border-[var(--status-warning-border)]", icon: AlertCircle, label: "Unscheduled" },
+  SCHEDULED: { bg: "bg-[var(--status-info-bg)]", text: "text-[var(--status-info-text)]", border: "border-[var(--status-info-border)]", icon: Clock, label: "Scheduled" },
+  DISPATCHED: { bg: "bg-amber-100 dark:bg-amber-950/80", text: "text-amber-800 dark:text-amber-200", border: "border-amber-300 dark:border-amber-800", icon: Clock, label: "Dispatched" },
+  DELIVERED: { bg: "bg-[var(--status-success-bg)]", text: "text-[var(--status-success-text)]", border: "border-[var(--status-success-border)]", icon: CheckCircle2, label: "Delivered" },
+  CANCELLED: { bg: "bg-slate-100 dark:bg-slate-900", text: "text-slate-700 dark:text-slate-300", border: "border-slate-300 dark:border-slate-700", icon: AlertOctagon, label: "Cancelled" },
+  EXPIRED: { bg: "bg-[var(--status-danger-bg)]", text: "text-[var(--status-danger-text)]", border: "border-[var(--status-danger-border)]", icon: AlertOctagon, label: "Expired" },
   Unscheduled: {
     bg: "bg-[var(--status-warning-bg)]",
     text: "text-[var(--status-warning-text)]",
@@ -77,7 +83,8 @@ export function StateBadge({
   className = "",
   showDot = true,
 }: StateBadgeProps) {
-  const config = stateConfig[state] || {
+  const normalizedState = state.trim().toUpperCase().replaceAll(" ", "_");
+  const config = stateConfig[normalizedState] || stateConfig[state] || {
     bg: "bg-[var(--status-neutral-bg)]",
     text: "text-[var(--text-primary)]",
     border: "border-[var(--status-neutral-border)]",
@@ -86,15 +93,15 @@ export function StateBadge({
   };
 
   const dotColor =
-    state === "Unscheduled"
+    normalizedState === "UNSCHEDULED" || state === "Unscheduled"
       ? "bg-amber-500"
-      : state === "Scheduled"
+      : normalizedState === "SCHEDULED" || state === "Scheduled"
       ? "bg-sky-500"
-      : state === "Partially Scheduled"
+      : normalizedState === "PARTIALLY_SCHEDULED" || state === "Partially Scheduled"
       ? "bg-purple-500"
-      : state === "Fulfilled"
+      : normalizedState === "DELIVERED" || state === "Fulfilled"
       ? "bg-emerald-500"
-      : state === "Expired"
+      : normalizedState === "EXPIRED" || state === "Expired"
       ? "bg-rose-500"
       : "bg-slate-400";
 

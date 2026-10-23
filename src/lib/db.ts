@@ -15,6 +15,7 @@ import {
   Hub,
 } from "./types";
 import { calculateDaysToExpiry } from "./parser";
+import { normalizeDispatchState } from "./dispatch-state";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
 import fs from "fs";
 import path from "path";
@@ -198,7 +199,8 @@ export function generateUploadPreview(
     const first = lines[0];
     const existing = existingHeadersMap.get(key);
     const daysToExpiry = calculateDaysToExpiry(first.expiry_date);
-    const isOpen = first.po_state !== "Expired" && first.po_state !== "Fulfilled";
+    const effectiveState = existingHeadersMap.get(`${first.channel_id}:${first.hub}:${first.po_number}`)?.po_state ?? normalizeDispatchState(first.po_state);
+    const isOpen = !["EXPIRED", "DELIVERED", "CANCELLED"].includes(normalizeDispatchState(effectiveState));
     if (isOpen && daysToExpiry <= nearExpiryDays && daysToExpiry >= 0) {
       posNearExpiry++;
     }
@@ -209,14 +211,7 @@ export function generateUploadPreview(
       const changedFields = new Set<string>();
 
       // 1. Header checks
-      if (existing.po_state !== first.po_state) {
-        changedFields.add("po_state");
-        stateChanges.push({
-          po_number: first.po_number,
-          old_state: existing.po_state,
-          new_state: first.po_state,
-        });
-      }
+      // Preserve app-managed state on every subsequent vendor upload.
       if (existing.expiry_date !== first.expiry_date) {
         changedFields.add("expiry_date");
       }
@@ -357,6 +352,7 @@ export async function commitUploadTransaction(
         name: r.name,
         short_name: null,
         upc: r.upc,
+        ean: r.upc,
         uom_text: r.uom_text,
         mrp: r.mrp,
       });
@@ -366,6 +362,7 @@ export async function commitUploadTransaction(
         ...existing,
         name: r.name,
         upc: r.upc || existing.upc,
+        ean: r.upc || existing.ean || existing.upc,
         uom_text: r.uom_text || existing.uom_text,
         mrp: r.mrp || existing.mrp,
       });
@@ -410,20 +407,6 @@ export async function commitUploadTransaction(
         }
       });
 
-      // Check state change
-      if (existingHeader.po_state !== first.po_state) {
-        store.po_state_history.push({
-          id: crypto.randomUUID(),
-          channel_id: first.channel_id,
-          hub: first.hub,
-          po_number: first.po_number,
-          old_state: existingHeader.po_state,
-          new_state: first.po_state,
-          changed_at: nowIso,
-          upload_id: uploadId,
-        });
-      }
-
       // Update Blinkit-owned header
       headerMap.set(poKey, {
         ...existingHeader,
@@ -434,7 +417,7 @@ export async function commitUploadTransaction(
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
-        po_state: first.po_state,
+        po_state: existingHeader.po_state,
         total_qty: totalQty,
         total_amount: Math.round(totalAmount),
         last_seen_at: nowIso,
@@ -453,7 +436,7 @@ export async function commitUploadTransaction(
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
-        po_state: first.po_state,
+        po_state: normalizeDispatchState(first.po_state),
         total_qty: totalQty,
         total_amount: Math.round(totalAmount),
         first_seen_at: nowIso,

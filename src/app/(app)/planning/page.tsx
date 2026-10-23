@@ -16,6 +16,7 @@ import { StateType } from '@/components/ui/StateBadge';
 import { PODetailDrawer, PODetailResponse } from '@/components/po/PODetailDrawer';
 import { formatINR, formatUnits, formatDate, daysLeft } from '@/lib/format';
 import { Hub } from '@/lib/types';
+import { formatSkuName } from '@/lib/dispatch-state';
 import {
   FileSpreadsheet,
   Download,
@@ -41,6 +42,8 @@ interface SKUInfo {
   is_stock_known?: boolean;
   total_open_order: number;
   balance: number | null;
+  ean?: string;
+  display_name?: string;
 }
 
 interface PlanningRow {
@@ -73,6 +76,7 @@ interface PlanningApiResponse {
   totalMasterSkus?: number;
   hiddenSkusCount?: number;
 }
+interface StateHistoryItem { old_state: string; new_state: string; planned_dispatch_date: string | null; changed_by: string; changed_at: string; note: string | null }
 
 export default function PlanningPage() {
   return (
@@ -104,7 +108,33 @@ function PlanningContent() {
   const [selectedCity, setSelectedCity] = useState('');
   const [selectedState, setSelectedState] = useState('');
   const [skuSearch, setSkuSearch] = useState('');
+  const [rowSearch, setRowSearch] = useState('');
+  const [expiryBucket, setExpiryBucket] = useState('');
+  const [compact, setCompact] = useState(false);
+  const [skuOrder, setSkuOrder] = useState<string[]>([]);
+  const [hiddenSkuIds, setHiddenSkuIds] = useState<string[]>([]);
+  const [showHiddenSkus, setShowHiddenSkus] = useState(false);
+  const [skuHeaderMode, setSkuHeaderMode] = useState<'short' | 'full'>('short');
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
+  const [bulkDate, setBulkDate] = useState('');
   const [onlyShortfall, setOnlyShortfall] = useState(false);
+
+  useEffect(() => {
+    try {
+      setSkuOrder(JSON.parse(localStorage.getItem('planning-sku-order') || '[]'));
+      setHiddenSkuIds(JSON.parse(localStorage.getItem('planning-hidden-skus') || '[]'));
+      setSkuHeaderMode(localStorage.getItem('planning-sku-header-mode') === 'full' ? 'full' : 'short');
+    } catch { /* ignore invalid saved preferences */ }
+  }, []);
+
+  const saveSkuOrder = (value: string[]) => {
+    const complete = [...new Set([...value, ...(data?.skus || []).map(s => s.item_id)])];
+    setSkuOrder(complete); localStorage.setItem('planning-sku-order', JSON.stringify(complete));
+  };
+  const toggleSkuHidden = (id: string) => {
+    const next = hiddenSkuIds.includes(id) ? hiddenSkuIds.filter(x => x !== id) : [...hiddenSkuIds, id];
+    setHiddenSkuIds(next); localStorage.setItem('planning-hidden-skus', JSON.stringify(next));
+  };
 
   // Global & Per-cell save status
   const [globalSaveStatus, setGlobalSaveStatus] = useState<SaveState>('saved');
@@ -113,12 +143,23 @@ function PlanningContent() {
 
   // Drawer state
   const [selectedPoNumber, setSelectedPoNumber] = useState<string | null>(null);
+  const [historyPo, setHistoryPo] = useState<string | null>(null);
+  const [historyItems, setHistoryItems] = useState<StateHistoryItem[]>([]);
 
   const handleHubChange = (newHub: Hub) => {
     if (newHub === hub) return;
+    setSelectedRows([]);
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set('hub', newHub);
     router.replace(`/planning?${nextParams.toString()}`, { scroll: false });
+  };
+
+  const openHistory = async (poNumber: string) => {
+    if (historyPo === poNumber) { setHistoryPo(null); return; }
+    setHistoryPo(poNumber);
+    const response = await fetch(`/api/planning?hub=${hub}&history=${encodeURIComponent(poNumber)}`);
+    const result = await response.json();
+    if (response.ok) setHistoryItems(result.history || []);
   };
 
   // Data Query
@@ -187,6 +228,26 @@ function PlanningContent() {
     },
   });
 
+  const dispatchMutation = useMutation({
+    mutationFn: async (payload: { po_number?: string; rows?: string[]; operation: 'date' | 'state'; date?: string | null; state?: string; note?: string }) => {
+      const res = await fetch('/api/planning', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'dispatch_state', hub, ...payload }) });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Dispatch update failed');
+      return result;
+    },
+    onSuccess: (result) => {
+      const warning = result.results?.find((r: { warning?: string }) => r.warning)?.warning;
+      if (warning) window.alert(warning);
+      queryClient.invalidateQueries({ queryKey: ['planning', hub] });
+    },
+    onError: (err) => window.alert(err instanceof Error ? err.message : 'Dispatch update failed'),
+  });
+
+  const bulkSchedule = () => {
+    if (!bulkDate || selectedRows.length === 0) return;
+    dispatchMutation.mutate({ operation: 'date', date: bulkDate, note: 'Bulk planned dispatch date update', rows: selectedRows });
+  };
+
   // Optimistic Stock Mutation
   const updateStockMutation = useMutation({
     mutationFn: async (payload: { item_id: string; qty_in_hand: number }) => {
@@ -242,54 +303,11 @@ function PlanningContent() {
     },
   });
 
-  // Mutation for editable SKU short name
-  const updateSkuShortNameMutation = useMutation({
-    mutationFn: async (payload: { item_id: string; short_name: string }) => {
-      const res = await fetch('/api/planning', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_sku_short_name', hub, ...payload }),
-      });
-      if (!res.ok) throw new Error('Short name update failed');
-      return res.json();
-    },
-    onMutate: async ({ item_id, short_name }) => {
-      setGlobalSaveStatus('saving');
-      setCellSaving((prev) => ({ ...prev, [`sku_name:${item_id}`]: 'saving' }));
-      queryClient.setQueryData<PlanningApiResponse>(
-        ['planning', hub, hideClosed, selectedCity, selectedState],
-        (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            skus: old.skus.map((s) => (s.item_id === item_id ? { ...s, short_name } : s)),
-          };
-        }
-      );
-    },
-    onSuccess: (_, { item_id }) => {
-      setGlobalSaveStatus('saved');
-      setLastSavedAt(new Date());
-      setCellSaving((prev) => ({ ...prev, [`sku_name:${item_id}`]: 'saved' }));
-      setTimeout(() => {
-        setCellSaving((prev) => {
-          const next = { ...prev };
-          delete next[`sku_name:${item_id}`];
-          return next;
-        });
-      }, 1500);
-    },
-    onError: (_, { item_id }) => {
-      setGlobalSaveStatus('failed');
-      setCellSaving((prev) => ({ ...prev, [`sku_name:${item_id}`]: 'failed' }));
-    },
-  });
-
   // Filtered SKUs (shortfall filter & search)
   // Shortfall is strictly defined as known stock < open order (balance < 0)
   const filteredSkus = useMemo(() => {
     if (!data?.skus) return [];
-    return data.skus.filter((s) => {
+    const matches = data.skus.filter((s) => {
       if (onlyShortfall) {
         if (s.balance === null || s.balance >= 0) return false;
       }
@@ -297,21 +315,34 @@ function PlanningContent() {
         const q = skuSearch.toLowerCase();
         return (
           s.name.toLowerCase().includes(q) ||
+          (s.ean || '').toLowerCase().includes(q) ||
           (s.short_name && s.short_name.toLowerCase().includes(q)) ||
           s.item_id.includes(q)
         );
       }
       return true;
     });
-  }, [data?.skus, onlyShortfall, skuSearch]);
+    const ordered = [...matches].sort((a, b) => {
+      const ai = skuOrder.indexOf(a.item_id), bi = skuOrder.indexOf(b.item_id);
+      return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi) || a.name.localeCompare(b.name);
+    });
+    return showHiddenSkus ? ordered : ordered.filter(s => !hiddenSkuIds.includes(s.item_id));
+  }, [data?.skus, onlyShortfall, skuSearch, skuOrder, hiddenSkuIds, showHiddenSkus]);
 
-  const rows = data?.rows || [];
+  const rows = useMemo(() => (data?.rows || []).filter((row) => {
+    const q = rowSearch.trim().toLowerCase();
+    if (q && !row.po_number.toLowerCase().includes(q) && !row.facility_raw.toLowerCase().includes(q) && !row.city.toLowerCase().includes(q)) return false;
+    if (expiryBucket === 'urgent' && row.days_to_expiry > 3) return false;
+    if (expiryBucket === 'week' && (row.days_to_expiry < 4 || row.days_to_expiry > 7)) return false;
+    if (expiryBucket === 'later' && row.days_to_expiry <= 7) return false;
+    return true;
+  }), [data?.rows, rowSearch, expiryBucket]);
 
   // Virtualizer for 400+ Rows
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 44,
+    estimateSize: () => compact ? 34 : 44,
     overscan: 10,
   });
 
@@ -338,14 +369,6 @@ function PlanningContent() {
     if (isNaN(val) || val < 0) return;
     if (val !== currentVal) {
       updateStockMutation.mutate({ item_id: itemId, qty_in_hand: val });
-    }
-  };
-
-  // Short name blur handler
-  const handleShortNameBlur = (itemId: string, currentVal: string, newValStr: string) => {
-    const trimmed = newValStr.trim();
-    if (trimmed && trimmed !== currentVal) {
-      updateSkuShortNameMutation.mutate({ item_id: itemId, short_name: trimmed });
     }
   };
 
@@ -460,6 +483,11 @@ function PlanningContent() {
       {/* 2. Filters & Search Strip */}
       <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex flex-wrap items-center gap-2.5">
+          <input aria-label="Search purchase orders or stores" value={rowSearch} onChange={e => setRowSearch(e.target.value)} placeholder="Search PO or store" className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-primary)]" />
+          <select aria-label="Filter by expiry" value={expiryBucket} onChange={e => setExpiryBucket(e.target.value)} className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-primary)]"><option value="">All expiry dates</option><option value="urgent">0–3 days</option><option value="week">4–7 days</option><option value="later">Over 7 days</option></select>
+          <button type="button" onClick={() => setCompact(!compact)} className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-hover)] text-[var(--text-secondary)]">{compact ? 'Compact' : 'Comfortable'}</button>
+          <button type="button" onClick={() => { const next = skuHeaderMode === 'short' ? 'full' : 'short'; setSkuHeaderMode(next); localStorage.setItem('planning-sku-header-mode', next); }} className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-hover)] text-[var(--text-secondary)]">{skuHeaderMode === 'short' ? 'Short SKU names' : 'Full SKU names'}</button>
+          {hiddenSkuIds.length > 0 && <button type="button" onClick={() => setShowHiddenSkus(!showHiddenSkus)} className="px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-hover)] text-[var(--text-secondary)]">{showHiddenSkus ? 'Hide excluded SKUs' : `Show excluded SKUs (${hiddenSkuIds.length})`}</button>}
           {/* City */}
           <select
             value={selectedCity}
@@ -528,6 +556,12 @@ function PlanningContent() {
             className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] text-xs focus:outline-none focus:border-[var(--accent-teal)]"
           />
         </div>
+        {selectedRows.length > 0 && <div className="flex items-center gap-2 basis-full border-t border-[var(--border-subtle)] pt-2">
+          <span className="font-semibold text-[var(--text-primary)]">{selectedRows.length} selected</span>
+          <input aria-label="Bulk planned dispatch date" type="date" value={bulkDate} onChange={e => setBulkDate(e.target.value)} className="px-2 py-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-input)]" />
+          <button type="button" disabled={!bulkDate || dispatchMutation.isPending} onClick={bulkSchedule} className="px-3 py-1 rounded bg-[var(--accent-teal)] text-white disabled:opacity-50">Schedule selected</button>
+          <button type="button" onClick={() => setSelectedRows([])} className="px-2 py-1 text-[var(--text-muted)]">Clear</button>
+        </div>}
       </div>
 
       {/* 3. Sticky Summary Strip */}
@@ -602,16 +636,19 @@ function PlanningContent() {
           ref={parentRef}
           className="relative max-h-[640px] overflow-auto rounded-[4px] border border-[var(--border-subtle)] bg-[var(--surface-card)] select-none"
         >
-          <table className="w-full border-collapse text-xs text-left">
+          <table className="w-max min-w-full table-fixed border-collapse text-xs text-left tabular-nums">
+            <colgroup><col style={{ width: 44 }} /><col style={{ width: 150 }} /><col style={{ width: 200 }} /><col style={{ width: 110 }} /><col style={{ width: 130 }} /><col style={{ width: 150 }} /><col style={{ width: 200 }} />{filteredSkus.map(s => <col key={s.item_id} style={{ width: 110 }} />)}<col style={{ width: 96 }} /><col style={{ width: 112 }} /></colgroup>
             {/* FROZEN HEADERS */}
             <thead className="sticky top-0 bg-[var(--surface-card)] shadow-xs" style={{ zIndex: "var(--z-table-sticky)" }}>
+              <tr className="h-7 bg-[var(--surface-ground)] border-b border-[var(--border-subtle)] text-[10px] uppercase tracking-wider text-[var(--text-muted)]"><th colSpan={7} className="sticky left-0 text-left px-3" style={{ zIndex: "var(--z-table-sticky-corner)" }}>PO planning</th><th colSpan={filteredSkus.length} className="text-left px-3">SKU quantities</th><th colSpan={2} className="text-left px-3">Totals</th></tr>
               {/* Row 1: Fixed Column Headers + Rotated SKU Names */}
-              <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]">
+              <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] h-[72px]">
+                <th className="sticky left-0 bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }} aria-label="Select rows"><input type="checkbox" aria-label="Select visible rows" checked={rows.length > 0 && rows.every(r => selectedRows.includes(r.po_number))} onChange={e => setSelectedRows(e.target.checked ? rows.map(r => r.po_number) : [])} /></th>
                 {/* Frozen Left Columns */}
-                <th className="sticky left-0 p-2.5 w-32 min-w-[128px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
+                <th className="sticky left-11 p-2.5 w-[150px] min-w-[150px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   PO Number
                 </th>
-                <th className="sticky left-32 p-2.5 w-40 min-w-[160px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
+                <th className="sticky left-[194px] p-2.5 w-[200px] min-w-[200px] font-semibold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
                   Store / City
                 </th>
                 <th className="p-2.5 w-24 min-w-[96px] text-center font-semibold text-[var(--text-primary)]">
@@ -631,13 +668,13 @@ function PlanningContent() {
                 {filteredSkus.map((sku) => (
                   <th
                     key={sku.item_id}
-                    className="p-1.5 w-20 min-w-[80px] max-w-[80px] text-center border-r border-[var(--border-subtle)] align-bottom group relative"
+                    className="p-1.5 w-[110px] min-w-[110px] max-w-[110px] text-center border-r border-[var(--border-subtle)] align-bottom group relative"
                     title={`${sku.name}\nSKU ID: ${sku.item_id}\nClick to edit display short name`}
                   >
-                    <div className="h-24 flex flex-col items-center justify-end pb-1 overflow-hidden">
-                      <span className="transform -rotate-45 block whitespace-nowrap text-[10px] font-semibold text-[var(--text-secondary)] truncate w-20 cursor-help">
-                        {sku.short_name || sku.name}
-                      </span>
+                    <div className="h-[68px] flex flex-col items-start justify-center overflow-hidden text-left">
+                      <span className="line-clamp-2 text-xs font-semibold text-[var(--text-primary)] w-full">{skuHeaderMode === 'full' ? (sku.display_name || sku.short_name || sku.name) : formatSkuName(sku.display_name || sku.short_name || sku.name)}</span>
+                      <div className="flex items-center gap-1"><button type="button" className="font-mono text-[10px] text-[var(--text-muted)] hover:text-[var(--accent-teal)] truncate" title="Copy EAN" onClick={() => void navigator.clipboard?.writeText(sku.ean || sku.item_id)}>{sku.ean || sku.item_id}</button><button type="button" title="Hide SKU" aria-label={`Hide ${sku.name}`} onClick={() => toggleSkuHidden(sku.item_id)} className="text-[10px] text-[var(--text-muted)]">×</button></div>
+                      <div className="flex gap-1"><button type="button" aria-label="Move SKU left" onClick={() => { const ids = filteredSkus.map(s => s.item_id); const i = ids.indexOf(sku.item_id); if (i > 0) { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; saveSkuOrder(ids); } }} className="text-[10px] text-[var(--text-muted)]">←</button><button type="button" aria-label="Move SKU right" onClick={() => { const ids = filteredSkus.map(s => s.item_id); const i = ids.indexOf(sku.item_id); if (i >= 0 && i < ids.length - 1) { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; saveSkuOrder(ids); } }} className="text-[10px] text-[var(--text-muted)]">→</button></div>
                     </div>
                   </th>
                 ))}
@@ -653,13 +690,8 @@ function PlanningContent() {
 
               {/* Row 2: Stock in Hand (Editable per SKU) */}
               <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-card)]">
-                <th className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
-                  Stock in Hand
-                </th>
-                <td className="sticky left-32 p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
-                  Editable per SKU
-                </td>
-                <td colSpan={4} className="border-r border-[var(--border-subtle)] bg-[var(--surface-card)]" />
+                <th colSpan={2} className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-card)] text-left" style={{ zIndex: "var(--z-table-sticky-corner)" }}>Stock in Hand · Editable per SKU</th>
+                <td colSpan={5} className="border-r border-[var(--border-subtle)] bg-[var(--surface-card)]" />
 
                 {filteredSkus.map((sku) => (
                   <td
@@ -682,13 +714,8 @@ function PlanningContent() {
 
               {/* Row 3: Open Orders */}
               <tr className="border-b border-[var(--border-subtle)] bg-[var(--surface-card)]">
-                <th className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
-                  Open Orders
-                </th>
-                <td className="sticky left-32 p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
-                  Sum of active lines
-                </td>
-                <td colSpan={4} className="border-r border-[var(--border-subtle)] bg-[var(--surface-card)]" />
+                <th colSpan={2} className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-card)] text-left" style={{ zIndex: "var(--z-table-sticky-corner)" }}>Open Orders · Sum of active lines</th>
+                <td colSpan={5} className="border-r border-[var(--border-subtle)] bg-[var(--surface-card)]" />
 
                 {filteredSkus.map((sku) => (
                   <td
@@ -703,13 +730,8 @@ function PlanningContent() {
 
               {/* Row 4: Net Balance (Red when negative, Green when positive, '–' when unknown) */}
               <tr className="border-b-2 border-[var(--border-strong)] bg-[var(--surface-raised)]">
-                <th className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
-                  Net Balance
-                </th>
-                <td className="sticky left-32 p-2 text-[10px] text-[var(--text-muted)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)]" style={{ zIndex: "var(--z-table-sticky-corner)" }}>
-                  Stock − Open
-                </td>
-                <td colSpan={4} className="border-r border-[var(--border-subtle)] bg-[var(--surface-raised)]" />
+                <th colSpan={2} className="sticky left-0 p-2 font-bold text-[var(--text-primary)] border-r border-[var(--border-strong)] bg-[var(--surface-raised)] text-left" style={{ zIndex: "var(--z-table-sticky-corner)" }}>Net Balance · Stock − Open</th>
+                <td colSpan={5} className="border-r border-[var(--border-subtle)] bg-[var(--surface-raised)]" />
 
                 {filteredSkus.map((sku) => {
                   const isUnknown = sku.balance === null;
@@ -756,19 +778,20 @@ function PlanningContent() {
                       height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
-                    className="flex border-b border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors"
+                    className={`flex border-b border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] transition-colors ${virtualRow.index % 2 ? 'bg-[var(--surface-ground)]' : 'bg-[var(--surface-card)]'} ${compact ? 'text-[11px]' : ''}`}
                   >
+                    <td className="w-11 min-w-11 flex items-center justify-center"><input type="checkbox" aria-label={`Select PO ${row.po_number}`} checked={selectedRows.includes(row.po_number)} onChange={e => setSelectedRows(prev => e.target.checked ? [...prev, row.po_number] : prev.filter(x => x !== row.po_number))} /></td>
                     {/* Frozen Left: PO Number */}
                     <td
                       onClick={() => setSelectedPoNumber(row.po_number)}
-                      className="sticky left-0 p-2.5 w-32 min-w-[128px] font-mono font-semibold text-[var(--accent-teal)] cursor-pointer truncate border-r border-[var(--border-strong)] bg-[var(--surface-card)] hover:bg-[var(--surface-hover)]" style={{ zIndex: "var(--z-table-sticky)" }}
+                      className="sticky left-11 p-2.5 w-[150px] min-w-[150px] font-mono font-semibold text-[var(--accent-teal)] cursor-pointer truncate border-r border-[var(--border-strong)] bg-[var(--surface-card)] hover:bg-[var(--surface-hover)]" style={{ zIndex: "var(--z-table-sticky)" }}
                       title="Click to inspect PO details"
                     >
                       #{row.po_number}
                     </td>
 
                     {/* Frozen Left: Store & City */}
-                    <td className="sticky left-32 p-2.5 w-40 min-w-[160px] truncate border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky)" }}>
+                    <td className="sticky left-[194px] p-2.5 w-[200px] min-w-[200px] truncate border-r border-[var(--border-strong)] bg-[var(--surface-card)]" style={{ zIndex: "var(--z-table-sticky)" }}>
                       <p className="font-semibold text-[var(--text-primary)] truncate" title={row.facility_raw}>
                         {row.facility_raw}
                       </p>
@@ -778,7 +801,7 @@ function PlanningContent() {
                     </td>
 
                     {/* Expiry Pill */}
-                    <td className="p-2 w-24 min-w-[96px] text-center self-center">
+                    <td className="p-2 w-[110px] min-w-[110px] text-center self-center">
                       <span
                         className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                           isExpired
@@ -793,12 +816,21 @@ function PlanningContent() {
                     </td>
 
                     {/* State Badge */}
-                    <td className="p-2 w-28 min-w-[112px] text-center self-center">
-                      <StateBadge state={row.po_state as StateType} size="sm" />
+                    <td className="relative p-2 w-[130px] min-w-[130px] text-center self-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <StateBadge state={row.po_state as StateType} size="sm" />
+                        <button type="button" onClick={() => void openHistory(row.po_number)} className="text-[9px] text-[var(--text-muted)] underline">History</button>
+                        {historyPo === row.po_number && <div className="absolute mt-12 z-50 w-64 max-h-48 overflow-auto rounded border border-[var(--border-subtle)] bg-[var(--surface-card)] p-2 text-left shadow-lg">{historyItems.length ? historyItems.map((item, i) => <div key={`${item.changed_at}:${i}`} className="border-b last:border-0 border-[var(--border-subtle)] py-1"><strong>{item.old_state} → {item.new_state}</strong><div>{item.note || 'State changed'} · {formatDate(item.changed_at)}</div><div className="text-[var(--text-muted)]">{item.changed_by} {item.planned_dispatch_date ? `· ${item.planned_dispatch_date}` : ''}</div></div>) : <span className="text-[var(--text-muted)]">No state history yet.</span>}</div>}
+                        <div className="flex gap-1">
+                          {row.po_state === 'SCHEDULED' && <button type="button" onClick={() => dispatchMutation.mutate({ po_number: row.po_number, operation: 'state', state: 'DISPATCHED' })} className="text-[9px] px-1.5 rounded bg-[var(--accent-teal)] text-white">Dispatched</button>}
+                          {row.po_state === 'DISPATCHED' && <button type="button" onClick={() => dispatchMutation.mutate({ po_number: row.po_number, operation: 'state', state: 'DELIVERED' })} className="text-[9px] px-1.5 rounded bg-emerald-600 text-white">Delivered</button>}
+                          {['UNSCHEDULED', 'SCHEDULED'].includes(row.po_state) && <button type="button" onClick={() => dispatchMutation.mutate({ po_number: row.po_number, operation: 'state', state: 'CANCELLED' })} className="text-[9px] px-1.5 rounded border border-rose-400 text-rose-600">Cancel</button>}
+                        </div>
+                      </div>
                     </td>
 
                     {/* Planned Dispatch Date Picker */}
-                    <td className="p-1.5 w-32 min-w-[128px] self-center">
+                    <td className="p-1.5 w-[150px] min-w-[150px] self-center">
                       <input
                         type="date"
                         key={`${row.po_number}:date:${row.internal_dispatch_date || ''}`}
@@ -806,12 +838,10 @@ function PlanningContent() {
                         data-col={0}
                         defaultValue={row.internal_dispatch_date || ''}
                         onKeyDown={(e) => handleKeyDown(e, virtualRow.index, 0)}
+                        disabled={['DISPATCHED', 'DELIVERED', 'CANCELLED', 'EXPIRED'].includes(row.po_state)}
                         onBlur={(e) => {
                           if (e.target.value !== row.internal_dispatch_date) {
-                            updateRowMutation.mutate({
-                              po_number: row.po_number,
-                              internal_dispatch_date: e.target.value || null,
-                            });
+                            dispatchMutation.mutate({ po_number: row.po_number, operation: 'date', date: e.target.value || null });
                           }
                         }}
                         className="w-full px-2 py-1 text-xs rounded border border-transparent hover:border-[var(--border-subtle)] focus:border-[var(--accent-teal)] bg-transparent focus:bg-[var(--surface-input)] outline-none"
@@ -819,7 +849,7 @@ function PlanningContent() {
                     </td>
 
                     {/* Remarks Input */}
-                    <td className="p-1.5 w-40 min-w-[160px] border-r border-[var(--border-subtle)] self-center">
+                    <td className="p-1.5 w-[200px] min-w-[200px] border-r border-[var(--border-subtle)] self-center">
                       <input
                         type="text"
                         key={`${row.po_number}:remarks:${row.remarks || ''}`}
@@ -846,7 +876,8 @@ function PlanningContent() {
                       return (
                         <td
                           key={sku.item_id}
-                          className="p-2 w-20 min-w-[80px] max-w-[80px] text-center border-r border-[var(--border-subtle)] font-mono self-center"
+                          className="p-2 w-[110px] min-w-[110px] max-w-[110px] text-center border-r border-[var(--border-subtle)] font-mono self-center"
+                          title={sku.balance !== null && sku.balance < 0 ? `Stock shortfall: ${Math.abs(sku.balance)} units` : undefined}
                         >
                           {qty !== undefined ? (
                             <span className="font-semibold text-[var(--text-primary)]">

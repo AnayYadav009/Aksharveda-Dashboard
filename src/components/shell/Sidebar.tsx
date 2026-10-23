@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Boxes,
   Users,
+  Tags,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -39,7 +40,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   const pathname = usePathname();
   const [isManagement, setIsManagement] = useState(false);
   useEffect(() => { void fetch('/api/auth/status').then(r => r.ok ? r.json() : null).then(data => setIsManagement(data?.role === 'management')).catch(() => setIsManagement(false)); }, []);
-  const navItems = isManagement ? [...NAV_ITEMS, { name: 'Users', href: '/settings/users', icon: Users }] : NAV_ITEMS;
+  const navItems = isManagement ? [...NAV_ITEMS, { name: 'SKU Master', href: '/settings/skus', icon: Tags }, { name: 'Users', href: '/settings/users', icon: Users }] : NAV_ITEMS;
 
   return (
     <aside

@@ -344,7 +344,7 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
       const kolkataPlanBefore = store.po_plan.find((p: any) => p.hub === "kolkata" && p.po_number === "PO-SHARED-999");
       expect(kolkataPlanBefore.remarks).toBe("Urgent Kolkata delivery");
 
-      // 6. Re-upload Delhi row with updated quantities and state
+      // 6. Re-upload Delhi row with updated quantities and a vendor state that must be ignored
       const updatedDelhiRow: CleanedBlinkitRow = {
         ...delhiRow,
         units_ordered: 120,
@@ -354,17 +354,17 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
       };
       await localCommit([updatedDelhiRow], "delhi_reupload.csv", "delhi_team", store, false);
 
-      // 7. Verify Delhi PO was updated
+      // 7. Verify Delhi PO data updated while its app-managed state remained unchanged
       const delhiHeaderAfter = store.po_header.find((h: any) => h.hub === "delhi");
       expect(delhiHeaderAfter.total_qty).toBe(120);
       expect(delhiHeaderAfter.total_amount).toBe(6000);
-      expect(delhiHeaderAfter.po_state).toBe("Confirmed");
+      expect(delhiHeaderAfter.po_state).toBe("UNSCHEDULED");
 
       // 8. Verify Kolkata PO, lines, and plan remarks were NOT touched at all
       const kolkataHeaderAfter = store.po_header.find((h: any) => h.hub === "kolkata");
       expect(kolkataHeaderAfter.total_qty).toBe(250);
       expect(kolkataHeaderAfter.total_amount).toBe(20000);
-      expect(kolkataHeaderAfter.po_state).toBe("Unscheduled");
+      expect(kolkataHeaderAfter.po_state).toBe("UNSCHEDULED");
 
       const kolkataLinesAfter = store.po_line.filter((l: any) => l.hub === "kolkata");
       expect(kolkataLinesAfter).toHaveLength(1);

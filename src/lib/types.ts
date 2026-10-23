@@ -52,6 +52,8 @@ export interface CleanedBlinkitRow {
   short_name?: string | null;
   uom_text: string;
   upc: string;
+  ean?: string;
+  display_name?: string | null;
   units_ordered: number;
   total_grn_quantity: number;
   remaining_quantity: number;
@@ -164,6 +166,8 @@ export interface SKUMaster {
   upc: string;
   uom_text: string;
   mrp: number;
+  ean?: string | null;
+  display_name?: string | null;
 }
 
 export interface StockSnapshot {

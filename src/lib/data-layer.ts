@@ -19,6 +19,7 @@ import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
 import { loadStore, saveStore, DatabaseStore } from "./db";
 import { getNotificationDispatcher } from "./notifications/notifier";
 import crypto from "crypto";
+import { normalizeDispatchState } from "./dispatch-state";
 
 export interface DataAdapterStatus {
   isFallback: boolean;
@@ -242,7 +243,7 @@ export async function getDashboardData(options: {
   // Calculate near expiry strictly for OPEN POs (not Expired or Fulfilled)
   let allPos = headers.map((h) => {
     const daysToExpiry = calculateDaysToExpiry(h.expiry_date);
-    const isOpen = h.po_state !== "Expired" && h.po_state !== "Fulfilled";
+    const isOpen = !["EXPIRED", "DELIVERED", "CANCELLED"].includes(normalizeDispatchState(h.po_state));
     const isNear = isOpen && daysToExpiry <= nearExpiryDays && daysToExpiry >= 0;
     return {
       po_number: h.po_number,
@@ -432,7 +433,7 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
 
   // Filter headers
   if (options.hideClosed) {
-    headers = headers.filter((h) => h.po_state !== "Fulfilled" && h.po_state !== "Expired");
+    headers = headers.filter((h) => !["DELIVERED", "EXPIRED", "CANCELLED"].includes(normalizeDispatchState(h.po_state)));
   }
   if (options.city) headers = headers.filter((h) => h.city === options.city);
   if (options.state) headers = headers.filter((h) => h.po_state === options.state);
@@ -444,7 +445,7 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
   // Open order calculations (Unscheduled, Scheduled, Partially Scheduled)
   const openPoKeys = new Set(
     headers
-      .filter((h) => ["Unscheduled", "Scheduled", "Partially Scheduled"].includes(h.po_state))
+      .filter((h) => ["UNSCHEDULED", "SCHEDULED"].includes(normalizeDispatchState(h.po_state)))
       .map((h) => `${h.channel_id}:${h.hub}:${h.po_number}`)
   );
 
@@ -471,7 +472,9 @@ export async function getPlanningGrid(options: { hideClosed: boolean; city?: str
     return {
       item_id: itemId,
       name: sku?.name || itemId,
-      short_name: sku?.short_name || sku?.name || itemId,
+      short_name: sku?.display_name || sku?.short_name || sku?.name || itemId,
+      display_name: sku?.display_name || sku?.short_name || sku?.name || itemId,
+      ean: sku?.ean || sku?.upc || "",
       stock_in_hand: stockInHand,
       is_stock_known: hasStock,
       total_open_order: totalOpenOrder,
@@ -735,7 +738,8 @@ export async function generateUploadPreview(
   rowMap.forEach((lines, key) => {
     const first = lines[0];
     const existing = existingHeadersMap.get(key);
-    const isOpen = first.po_state !== "Expired" && first.po_state !== "Fulfilled";
+    const effectiveState = existingHeadersMap.get(`${first.channel_id}:${first.hub}:${first.po_number}`)?.po_state ?? normalizeDispatchState(first.po_state);
+    const isOpen = !["EXPIRED", "DELIVERED", "CANCELLED"].includes(normalizeDispatchState(effectiveState));
     const daysToExpiry = calculateDaysToExpiry(first.expiry_date);
 
     // Near expiry: strictly open POs expiring in 0..7 days (Item 5)
@@ -749,14 +753,8 @@ export async function generateUploadPreview(
       const changedFields = new Set<string>();
 
       // 1. Compare PO Header fields
-      if (existing.po_state !== first.po_state) {
-        changedFields.add("po_state");
-        stateChanges.push({
-          po_number: first.po_number,
-          old_state: existing.po_state,
-          new_state: first.po_state,
-        });
-      }
+      // Vendor CSV state is authoritative only for new POs. App-managed states on
+      // existing POs are preserved and must not appear as upload state changes.
       if (existing.expiry_date !== first.expiry_date) changedFields.add("expiry_date");
       if (existing.appointment_date !== first.appointment_date) changedFields.add("appointment_date");
       if (first.region !== undefined && existing.region !== first.region) changedFields.add("region");
@@ -872,9 +870,11 @@ export async function commitUploadTransaction(
     const poNumbers = poEntries.map((e) => e.po_number);
     const hubs = Array.from(new Set(poEntries.map((e) => e.hub)));
     const channels = Array.from(new Set(poEntries.map((e) => e.channel_id)));
+    const itemIds = Array.from(new Set(cleanedRows.map((r) => r.item_id)));
 
     const { data: backupHeaders } = await supabase.from("po_header").select("*").in("channel_id", channels).in("po_number", poNumbers).in("hub", hubs);
     const { data: backupLines } = await supabase.from("po_line").select("*").in("channel_id", channels).in("po_number", poNumbers).in("hub", hubs);
+    const { data: backupSkus } = await supabase.from("sku_master").select("*").in("item_id", itemIds);
 
     try {
       // 1. Insert upload_log entry
@@ -901,11 +901,15 @@ export async function commitUploadTransaction(
       const skuMap = new Map<string, SKUMaster>();
       cleanedRows.forEach((r) => {
         if (!skuMap.has(r.item_id)) {
+          const existingSku = backupSkus?.find((sku) => sku.item_id === r.item_id);
           skuMap.set(r.item_id, {
+            ...existingSku,
             item_id: r.item_id,
             name: r.name,
-            short_name: null,
+            short_name: existingSku?.short_name ?? null,
             upc: r.upc,
+            ean: r.upc,
+            display_name: existingSku?.display_name ?? null,
             uom_text: r.uom_text,
             mrp: r.mrp,
           });
@@ -943,18 +947,6 @@ export async function commitUploadTransaction(
             }
           });
 
-          if (ex.po_state !== first.po_state) {
-            stateHistoryToInsert.push({
-              id: crypto.randomUUID(),
-              channel_id: first.channel_id,
-              hub: first.hub,
-              po_number: first.po_number,
-              old_state: ex.po_state,
-              new_state: first.po_state,
-              changed_at: nowIso,
-              upload_id: uploadId,
-            });
-          }
           headersToUpsert.push({
             ...ex,
             facility_raw: first.facility_raw,
@@ -964,7 +956,7 @@ export async function commitUploadTransaction(
             order_date: first.order_date,
             expiry_date: first.expiry_date,
             appointment_date: first.appointment_date,
-            po_state: first.po_state,
+            po_state: ex.po_state,
             total_qty: totalQty,
             total_amount: Math.round(totalAmount),
             last_seen_at: nowIso,
@@ -982,7 +974,7 @@ export async function commitUploadTransaction(
             order_date: first.order_date,
             expiry_date: first.expiry_date,
             appointment_date: first.appointment_date,
-            po_state: first.po_state,
+            po_state: normalizeDispatchState(first.po_state),
             total_qty: totalQty,
             total_amount: Math.round(totalAmount),
             first_seen_at: nowIso,
@@ -1181,6 +1173,8 @@ async function commitUploadFallback(
         name: r.name,
         short_name: null,
         upc: r.upc,
+        ean: r.upc,
+        display_name: null,
         uom_text: r.uom_text,
         mrp: r.mrp,
       });
@@ -1220,18 +1214,6 @@ async function commitUploadFallback(
         }
       });
 
-      if (existingHeader.po_state !== first.po_state) {
-        store.po_state_history.push({
-          id: crypto.randomUUID(),
-          channel_id: first.channel_id,
-          hub: first.hub,
-          po_number: first.po_number,
-          old_state: existingHeader.po_state,
-          new_state: first.po_state,
-          changed_at: nowIso,
-          upload_id: uploadId,
-        });
-      }
       headerMap.set(poKey, {
         ...existingHeader,
         facility_raw: first.facility_raw,
@@ -1241,7 +1223,7 @@ async function commitUploadFallback(
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
-        po_state: first.po_state,
+        po_state: existingHeader.po_state,
         total_qty: totalQty,
         total_amount: Math.round(totalAmount),
         last_seen_at: nowIso,
@@ -1259,7 +1241,7 @@ async function commitUploadFallback(
         order_date: first.order_date,
         expiry_date: first.expiry_date,
         appointment_date: first.appointment_date,
-        po_state: first.po_state,
+        po_state: normalizeDispatchState(first.po_state),
         total_qty: totalQty,
         total_amount: Math.round(totalAmount),
         first_seen_at: nowIso,

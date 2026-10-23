@@ -142,6 +142,7 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     const res1 = await commitUploadTransaction(sample, "test1.csv", "tester", testStore, false);
     expect(res1.preview.pos_new).toBe(1);
     expect(testStore.po_plan).toHaveLength(1);
+    expect(testStore.sku_master[0].ean).toBe(sample[0].upc);
 
     // Ops team enters custom remarks and dispatch date
     testStore.po_plan[0].remarks = "Urgent Surat Diwali order";
@@ -156,12 +157,11 @@ describe("CSV Reconciliation & Domain Integrity Suite", () => {
     expect(testStore.po_plan[0].remarks).toBe("Urgent Surat Diwali order");
     expect(testStore.po_plan[0].internal_dispatch_date).toBe("2026-10-20");
 
-    // Verify state transition audit history
+    // Vendor state changes are ignored after the initial upload.
     const stateChangeRow = [{ ...sample[0], po_state: "Scheduled" }];
     const res3 = await commitUploadTransaction(stateChangeRow, "test2.csv", "tester", testStore, false);
-    expect(res3.preview.pos_updated).toBe(1);
-    expect(testStore.po_state_history).toHaveLength(1);
-    expect(testStore.po_state_history[0].old_state).toBe("Unscheduled");
-    expect(testStore.po_state_history[0].new_state).toBe("Scheduled");
+    expect(res3.preview.pos_updated).toBe(0);
+    expect(testStore.po_state_history).toHaveLength(0);
+    expect(testStore.po_header[0].po_state).toBe("UNSCHEDULED");
   });
 });

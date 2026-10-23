@@ -105,10 +105,19 @@ If using Supabase Postgres:
    - `supabase/migrations/20261022000003_profiles_and_rls.sql`
    - `supabase/migrations/20261022000004_add_pending_role.sql`
    - `supabase/migrations/20261023000001_hub_split_and_auth_lockdown.sql`
+   - `supabase/migrations/20261024000001_dispatch_workflow_sku_ean.sql`
 
 Back up the database before applying migrations. Review the hub migration before running it in the Supabase SQL Editor. It has not been applied by this repository workflow.
 
 New signups receive a `pending` profile automatically only after all migrations have been applied, including `20261023000001_hub_split_and_auth_lockdown.sql`. If the `profiles` table is missing, the app reports that database setup is required.
+
+The dispatch migration installs `pg_cron` and schedules `expire-dispatch-pos` daily at 00:05 UTC (05:35 IST). Some Supabase projects do not permit installing the extension from a migration. In that case the migration prints a notice; in the Supabase Dashboard open **Database → Extensions**, enable `pg_cron`, then run this in the SQL Editor:
+
+```sql
+SELECT cron.schedule('expire-dispatch-pos', '5 0 * * *', 'SELECT public.expire_dispatch_pos()');
+```
+
+Confirm it is scheduled with `SELECT jobname, schedule, command FROM cron.job WHERE jobname = 'expire-dispatch-pos';`. If `cron` is still unavailable after enabling the extension, contact the Supabase project owner/support to enable `pg_cron` for the project before relying on automatic expiry.
 
 To promote the first administrator, edit the email at the top of `scripts/make-admin.sql` and run the whole script in the Supabase SQL Editor. The script inserts a profile when one is missing and promotes an existing profile safely. To review accounts awaiting approval, run `scripts/pending-users.sql`.
 
