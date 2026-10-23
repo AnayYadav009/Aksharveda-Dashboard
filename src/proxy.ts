@@ -77,13 +77,16 @@ export async function proxy(req: NextRequest) {
 
   // 4. Check user profile role for approval status
   // Query profiles table using user.id
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("role")
     .eq("user_id", user.id)
     .single();
 
   // Missing profiles are treated as unapproved, just like pending profiles.
+  const databaseNotReady = profileError?.code === "42P01" || profileError?.code === "PGRST205";
+  if (databaseNotReady && (pathname === "/pending" || pathname.startsWith("/api/"))) return response;
+
   const userRole = profile?.role || "pending";
 
   // If role is pending:
@@ -91,6 +94,7 @@ export async function proxy(req: NextRequest) {
   // - If visiting /pending, allow access
   // - If visiting any other page, redirect to /pending
   if (userRole === "pending") {
+    if (pathname === "/api/auth/status") return response;
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
         { error: "Forbidden: Account pending approval" },
