@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as supabaseModule from "../src/lib/supabase";
 import { isSupabaseConfigured, getSupabaseClient } from "../src/lib/supabase";
 import { getDataAdapterStatus } from "../src/lib/data-layer";
 import { getNotificationDispatcher, NotificationDispatcher } from "../src/lib/notifications/notifier";
@@ -18,11 +19,13 @@ describe("Library Modules & Data Layer Test Suite", () => {
   });
 
   describe("data-layer adapter status", () => {
-    it("reports real database adapter status via live query", async () => {
+    it("reports the configured adapter without contacting a live database", async () => {
+      const query = { limit: vi.fn().mockResolvedValue({ data: [{ id: "blinkit" }], error: null }) };
+      const from = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue(query) });
+      const spy = vi.spyOn(supabaseModule, "getSupabaseClient").mockReturnValue({ from } as any);
       const status = await getDataAdapterStatus();
-      expect(status).toHaveProperty("isFallback");
-      expect(status).toHaveProperty("adapter");
-      expect(["supabase_postgres", "json_fallback"]).toContain(status.adapter);
+      expect(status).toEqual({ isFallback: false, adapter: "supabase_postgres" });
+      spy.mockRestore();
     });
   });
 

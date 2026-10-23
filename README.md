@@ -67,9 +67,9 @@ npm install
 ```
 
 ### 2. Configure Environment Variables
-Copy the template configuration file:
+Create an untracked local configuration file (never commit it):
 ```bash
-cp .env.example .env.local
+New-Item .env.local
 ```
 
 Edit `.env.local` to fit your setup:
@@ -103,13 +103,21 @@ If using Supabase Postgres:
    - `supabase/migrations/20261022000001_fix_upload_log.sql`
    - `supabase/migrations/20261022000002_add_region_to_po_header.sql`
    - `supabase/migrations/20261022000003_profiles_and_rls.sql`
+   - `supabase/migrations/20261022000004_add_pending_role.sql`
+   - `supabase/migrations/20261023000001_hub_split_and_auth_lockdown.sql`
+
+Back up the database before applying migrations. Review the hub migration before running it in the Supabase SQL Editor. It has not been applied by this repository workflow.
+
+New signups receive a `pending` profile automatically only after all migrations have been applied, including `20261023000001_hub_split_and_auth_lockdown.sql`. If the `profiles` table is missing, the app reports that database setup is required.
+
+To promote the first administrator, edit the email at the top of `scripts/make-admin.sql` and run the whole script in the Supabase SQL Editor. The script inserts a profile when one is missing and promotes an existing profile safely. To review accounts awaiting approval, run `scripts/pending-users.sql`.
 
 *Note: In development mode, if no Supabase environment variables are provided, the application automatically uses the local JSON database adapter located at `.data/store.json` with atomic writes.*
 
 ### 4. Authentication & Role-Based Access Control (RBAC)
 When Supabase is configured:
 - Users log in via `/login` with Supabase Auth credentials.
-- Roles are assigned via the `profiles` table (`demand`, `warehouse`, `management`).
+- Roles are assigned via the `profiles` table (`pending`, `demand`, `warehouse`, `management`). Management users can assign roles at `/settings/users`.
 - **Permissions**:
   - `demand`: Ingest Blinkit PO CSV exports, view analytics, edit planning/stock.
   - `warehouse`: Dispatch planning sheet management, edit line items, update stock quantities.
@@ -133,11 +141,10 @@ aksharveda-po-dashboard/
 ├── scripts/
 │   └── check-secrets.js               # Pre-commit secret scanning utility
 ├── src/
-│   ├── middleware.ts                  # Root auth route protection & redirection
+│   ├── proxy.ts                       # Root auth route protection & redirection
 │   ├── app/
 │   │   ├── api/                       # API routes (upload, pos, planning, stock, recipients)
 │   │   ├── login/                     # Authentication login page
-│   │   ├── design/                    # Design system documentation & preview page
 │   │   ├── planning/                  # Dispatch planning spreadsheet matrix
 │   │   ├── pos/                       # Main PO analytics dashboard & drawers
 │   │   ├── settings/recipients/       # Notification recipient settings
@@ -164,7 +171,6 @@ aksharveda-po-dashboard/
 ├── supabase/
 │   └── migrations/                    # Postgres schema migrations
 ├── test/                              # Vitest unit & Playwright E2E suites
-├── .env.example                       # Environment variable template
 ├── package.json
 └── tsconfig.json
 ```
@@ -180,6 +186,7 @@ aksharveda-po-dashboard/
 | `npm start` | Runs production Next.js server |
 | `npm run typecheck` | Validates TypeScript types across the entire project |
 | `npm run check:secrets` | Scans codebase for accidentally committed secrets or tokens |
+| `npm run check:migrations` | Verifies the README migration order matches the folder and the latest migration stays last |
 | `npm test` | Runs all Vitest unit and integration test suites |
 | `npm run test:e2e` | Runs Playwright browser end-to-end test suite |
 

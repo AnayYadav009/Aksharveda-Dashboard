@@ -10,6 +10,10 @@ export interface Column<T> {
   align?: "left" | "center" | "right";
   render?: (item: T, index: number) => React.ReactNode;
   sortable?: boolean;
+  /** Allow this column's cells to wrap text (default: nowrap) */
+  wrap?: boolean;
+  /** Apply tabular-nums font-feature on this column */
+  numeric?: boolean;
 }
 
 export type SortDirection = "asc" | "desc" | null;
@@ -30,6 +34,10 @@ interface DataTableProps<T> {
   onSort?: (key: string) => void;
 }
 
+/** Shared border-radius applied to all three states (loading / empty / data). */
+const SHELL_CLS =
+  "overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xs";
+
 export function DataTable<T>({
   columns,
   data,
@@ -45,15 +53,21 @@ export function DataTable<T>({
   sortDirection,
   onSort,
 }: DataTableProps<T>) {
+  // Default maxHeight allows sticky header to work within the viewport.
+  const resolvedMaxHeight = maxHeight ?? "calc(100vh - 320px)";
+
   if (isLoading) {
     return (
-      <div className={`overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xs ${className}`}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] text-xs font-semibold uppercase text-[var(--text-muted)]">
+      <div className={`${SHELL_CLS} ${className}`}>
+        <div className="overflow-x-auto scroll-shadow-right">
+          <table className="w-full min-w-max text-left text-sm">
+            <thead
+              className="border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] text-xs font-semibold uppercase text-[var(--text-muted)]"
+              style={{ zIndex: "var(--z-table-sticky)" }}
+            >
               <tr>
                 {columns.map((col) => (
-                  <th key={col.key} className="px-4 py-3" style={{ width: col.width }}>
+                  <th key={col.key} className="px-3 py-2 whitespace-nowrap" style={{ width: col.width }}>
                     <Skeleton className="h-4 w-20" />
                   </th>
                 ))}
@@ -63,7 +77,7 @@ export function DataTable<T>({
               {Array.from({ length: loadingRows }).map((_, rIdx) => (
                 <tr key={rIdx}>
                   {columns.map((col) => (
-                    <td key={col.key} className="px-4 py-3.5">
+                    <td key={col.key} className="px-3 py-2">
                       <Skeleton className="h-4 w-full max-w-[120px]" />
                     </td>
                   ))}
@@ -78,7 +92,7 @@ export function DataTable<T>({
 
   if (data.length === 0) {
     return (
-      <div className={`overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xs ${className}`}>
+      <div className={`${SHELL_CLS} ${className}`}>
         {emptyState || (
           <EmptyState
             title="No records found"
@@ -90,18 +104,17 @@ export function DataTable<T>({
   }
 
   return (
-    <div
-      className={`overflow-hidden rounded-[4px] border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-xs transition-colors ${className}`}
-    >
+    <div className={`${SHELL_CLS} transition-colors ${className}`}>
       <div
-        className="overflow-x-auto"
-        style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}
+        className="overflow-x-auto scroll-shadow-right"
+        style={{ maxHeight: resolvedMaxHeight, overflowY: "auto" }}
       >
-        <table className="w-full text-left text-xs border-collapse">
+        <table className="w-full min-w-max text-left text-xs border-collapse">
           <thead
-            className={`border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] ${
-              stickyHeader ? "sticky top-0 z-10 backdrop-blur-xs" : ""
+            className={`border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]${
+              stickyHeader ? " sticky top-0 backdrop-blur-xs" : ""
             }`}
+            style={stickyHeader ? { zIndex: "var(--z-table-sticky)" } : undefined}
           >
             <tr>
               {columns.map((col) => {
@@ -110,37 +123,35 @@ export function DataTable<T>({
                   <th
                     key={col.key}
                     scope="col"
-                    aria-sort={isSorted ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+                    aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
                     style={{ width: col.width }}
                     onClick={() => {
-                      if (col.sortable && onSort) {
-                        onSort(col.key);
-                      }
+                      if (col.sortable && onSort) onSort(col.key);
                     }}
                     onKeyDown={(e) => {
-                      if (col.sortable && onSort && (e.key === 'Enter' || e.key === ' ')) {
+                      if (col.sortable && onSort && (e.key === "Enter" || e.key === " ")) {
                         e.preventDefault();
                         onSort(col.key);
                       }
                     }}
                     tabIndex={col.sortable ? 0 : undefined}
-                    className={`px-3 py-2.5 font-medium select-none focus:outline-none focus:ring-2 focus:ring-[var(--accent-teal)] focus:ring-inset rounded-xs ${
-                      col.sortable ? "cursor-pointer hover:text-[var(--text-primary)] transition-colors" : ""
-                    } ${
+                    className={`px-3 py-2 font-medium select-none whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-[var(--accent-teal)] focus:ring-inset rounded-xs${
+                      col.sortable ? " cursor-pointer hover:text-[var(--text-primary)] transition-colors" : ""
+                    }${
                       col.align === "right"
-                        ? "text-right"
+                        ? " text-right"
                         : col.align === "center"
-                        ? "text-center"
-                        : "text-left"
+                        ? " text-center"
+                        : " text-left"
                     }`}
                   >
                     <div
-                      className={`inline-flex items-center gap-1.5 ${
+                      className={`inline-flex items-center gap-1.5${
                         col.align === "right"
-                          ? "justify-end flex-row-reverse"
+                          ? " justify-end flex-row-reverse"
                           : col.align === "center"
-                          ? "justify-center"
-                          : "justify-start"
+                          ? " justify-center"
+                          : " justify-start"
                       }`}
                     >
                       <span>{col.header}</span>
@@ -161,7 +172,7 @@ export function DataTable<T>({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[var(--border-subtle)] text-[var(--text-secondary)]">
+          <tbody className="text-[var(--text-secondary)]">
             {data.map((item, idx) => {
               const rowKey = keyExtractor(item, idx);
               return (
@@ -169,15 +180,15 @@ export function DataTable<T>({
                   key={rowKey}
                   onClick={() => onRowClick?.(item)}
                   onKeyDown={(e) => {
-                    if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
+                    if (onRowClick && (e.key === "Enter" || e.key === " ")) {
                       e.preventDefault();
                       onRowClick(item);
                     }
                   }}
                   tabIndex={onRowClick ? 0 : undefined}
                   role={onRowClick ? "button" : undefined}
-                  className={`transition-colors duration-150 hover:bg-[var(--surface-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-teal)] ${
-                    onRowClick ? "cursor-pointer" : ""
+                  className={`border-b border-[var(--border-subtle)] transition-colors duration-150 hover:bg-[var(--surface-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-teal)]${
+                    onRowClick ? " cursor-pointer" : ""
                   }`}
                 >
                   {columns.map((col) => {
@@ -188,12 +199,14 @@ export function DataTable<T>({
                     return (
                       <td
                         key={col.key}
-                        className={`px-3 py-2 whitespace-nowrap text-xs ${
+                        className={`px-3 py-2 text-xs${col.wrap ? "" : " whitespace-nowrap"}${
+                          col.numeric ? " tabular-nums" : ""
+                        }${
                           col.align === "right"
-                            ? "text-right font-mono"
+                            ? " text-right font-mono"
                             : col.align === "center"
-                            ? "text-center"
-                            : "text-left"
+                            ? " text-center"
+                            : " text-left"
                         }`}
                       >
                         {content}

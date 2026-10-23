@@ -43,6 +43,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     if (body.action === "update_sku_short_name" && body.item_id && typeof body.short_name === "string") {
+      const hubResult = HubSchema.safeParse(body.hub);
+      if (!hubResult.success) {
+        return NextResponse.json({ error: "Invalid or missing hub parameter: must be 'delhi' or 'kolkata'" }, { status: 400 });
+      }
       const { updateSKUShortName } = await import("@/lib/data-layer");
       const result = await updateSKUShortName(body.item_id, body.short_name.trim());
       return NextResponse.json(result);
@@ -51,7 +55,11 @@ export async function POST(req: NextRequest) {
       if (process.env.NODE_ENV === "production") {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
-      const testHub = HubSchema.safeParse(body.hub).success ? (body.hub as any) : "delhi";
+      const testHubResult = HubSchema.safeParse(body.hub);
+      if (!testHubResult.success) {
+        return NextResponse.json({ error: "Invalid or missing hub parameter: must be 'delhi' or 'kolkata'" }, { status: 400 });
+      }
+      const testHub = testHubResult.data;
       if (body.action === "upsert_test_po" && body.po_number?.startsWith("TEST-E2E-")) {
         const { upsertTestPO } = await import("../../../lib/data-layer");
         const result = await upsertTestPO(body.po_number, testHub);

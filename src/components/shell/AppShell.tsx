@@ -24,12 +24,12 @@ export function AppShell({ children }: AppShellProps) {
 
       {/* Mobile Drawer Sidebar */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
+        <div className="fixed inset-0 md:hidden flex" style={{ zIndex: "var(--z-drawer)" }}>
           <div
             className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
             onClick={() => setMobileOpen(false)}
           />
-          <div className="relative z-10 w-64 bg-[var(--surface-card)] h-full shadow-2xl">
+          <div className="relative w-64 bg-[var(--surface-card)] h-full shadow-2xl" style={{ zIndex: "var(--z-drawer)" }}>
             <Sidebar
               collapsed={false}
               onToggleCollapsed={() => setMobileOpen(false)}

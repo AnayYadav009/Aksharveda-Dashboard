@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -11,8 +11,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  ShieldCheck,
   Boxes,
+  Users,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -37,10 +37,14 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   const pathname = usePathname();
+  const [isManagement, setIsManagement] = useState(false);
+  useEffect(() => { void fetch('/api/auth/status').then(r => r.ok ? r.json() : null).then(data => setIsManagement(data?.role === 'management')).catch(() => setIsManagement(false)); }, []);
+  const navItems = isManagement ? [...NAV_ITEMS, { name: 'Users', href: '/settings/users', icon: Users }] : NAV_ITEMS;
 
   return (
     <aside
-      className={`fixed top-0 left-0 bottom-0 z-30 flex flex-col bg-[#0a0e17] text-slate-300 border-r border-slate-800 transition-all duration-300 ease-in-out ${
+      style={{ zIndex: "var(--z-sidebar)" }}
+      className={`fixed top-0 left-0 bottom-0 flex flex-col bg-[#0a0e17] text-slate-300 border-r border-slate-800 transition-all duration-300 ease-in-out ${
         collapsed ? 'w-16' : 'w-64'
       }`}
     >
@@ -69,7 +73,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 
       {/* Nav List */}
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
           const isActive =
             pathname === item.href ||
@@ -103,7 +107,7 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
 
               {/* Tooltip on collapsed hover */}
               {collapsed && (
-                <div className="absolute left-full ml-3 px-2 py-1 text-[11px] font-medium text-white bg-slate-900 border border-slate-700 rounded-[4px] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 whitespace-nowrap">
+                <div className="absolute left-full ml-3 px-2 py-1 text-[11px] font-medium text-white bg-slate-900 border border-slate-700 rounded-[4px] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity whitespace-nowrap" style={{ zIndex: "var(--z-modal)" }}>
                   {item.name}
                 </div>
               )}
@@ -111,22 +115,6 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
           );
         })}
       </nav>
-
-      {/* Design System Link */}
-      <div className="p-2 border-t border-slate-800">
-        <Link
-          href="/design"
-          title={collapsed ? 'Design System' : undefined}
-          className={`flex items-center gap-3 px-3 py-2 rounded-[4px] text-xs font-medium transition-colors ${
-            pathname === '/design'
-              ? 'bg-slate-800 text-teal-400 font-semibold'
-              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 shrink-0 text-teal-400" />
-          {!collapsed && <span>Design System</span>}
-        </Link>
-      </div>
 
       {/* Collapse Toggle Footer */}
       <div className="p-2 border-t border-slate-800 flex items-center justify-between">

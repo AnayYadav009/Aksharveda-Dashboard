@@ -3,6 +3,11 @@ import { commitUploadTransaction, getDashboardData } from "../src/lib/data-layer
 import * as supabaseModule from "../src/lib/supabase";
 import { CleanedBlinkitRow } from "../src/lib/types";
 
+vi.mock("../src/lib/db", async (importOriginal) => {
+  const db = await importOriginal<typeof import("../src/lib/db")>();
+  return { ...db, saveStore: vi.fn() };
+});
+
 describe("Phase 1 Data Layer Integrity Suite", () => {
   it("throws on Supabase errors and does not swallow them", async () => {
     const errorMsg = "Database connection timed out";
@@ -11,6 +16,7 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
         if (hasError) return Promise.resolve({ data: null, error: new Error(errorMsg) });
         return Promise.resolve({ data: [], error: null });
       }),
+      eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),
       in: vi.fn().mockResolvedValue({ data: [], error: null }),
       limit: vi.fn().mockResolvedValue({ data: [{ id: "blinkit" }], error: null }),
@@ -77,6 +83,7 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
     // Generate 1500 mock headers
     const mockHeaders = Array.from({ length: 1500 }, (_, i) => ({
       channel_id: "blinkit",
+      hub: "delhi",
       po_number: `PO-${100000 + i}`,
       facility_raw: "Delhi Hub",
       city: "Delhi",
@@ -99,9 +106,8 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
             const slice = mockHeaders.slice(from, to + 1);
             return Promise.resolve({ data: slice, error: null });
           }),
-          eq: vi.fn().mockImplementation(() => ({
-            maybeSingle: vi.fn().mockResolvedValue({ data: { value: 7 }, error: null }),
-          })),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: { value: 7 }, error: null }),
           limit: vi.fn().mockResolvedValue({ data: [{ id: "blinkit" }], error: null }),
         })),
       })),
@@ -109,7 +115,7 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
 
     const spy = vi.spyOn(supabaseModule, "getSupabaseClient").mockReturnValue(mockSupabase as any);
 
-    const result = await getDashboardData({ view: "month", month: "2026-10", paginate: false });
+    const result = await getDashboardData({ hub: "delhi", view: "month", month: "2026-10", paginate: false });
     expect(result.summary.total_pos).toBe(1500);
     expect(result.pos.length).toBe(1500);
 
@@ -122,6 +128,7 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
     const createQueryChain = () => {
       const chain: any = {
         range: vi.fn().mockResolvedValue({ data: [], error: null }),
+        eq: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
         in: vi.fn().mockImplementation(() => chain),
         limit: vi.fn().mockResolvedValue({ data: [{ id: "blinkit" }], error: null }),
@@ -151,6 +158,16 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
     };
 
     const spy = vi.spyOn(supabaseModule, "getSupabaseClient").mockReturnValue(mockSupabase as any);
+
+    const dbModule = await import("../src/lib/db");
+    const mirrorStore = {
+      channels: [{ id: "blinkit", name: "Blinkit" }],
+      upload_log: [], po_header: [], po_line: [], sku_master: [], po_plan: [],
+      po_line_dispatch: [], stock_snapshot: [], po_state_history: [],
+      settings: {}, notification_recipients: [], in_app_notifications: [],
+    } as any;
+    const loadMirrorSpy = vi.spyOn(dbModule, "loadStore").mockReturnValue(mirrorStore);
+    const saveMirrorSpy = vi.spyOn(dbModule, "saveStore").mockImplementation(() => {});
 
     const sampleRow: CleanedBlinkitRow = {
       channel_id: "blinkit",
@@ -196,6 +213,8 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
     ]);
 
     spy.mockRestore();
+    loadMirrorSpy.mockRestore();
+    saveMirrorSpy.mockRestore();
   });
 
   it("handles the same PO number across Delhi and Kolkata independently and prevents re-upload overwrite across hubs", async () => {
@@ -284,10 +303,10 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
     };
 
     // 1. Upload Delhi row
-    await localCommit([delhiRow], "delhi_upload.csv", "delhi_team", store);
+    await localCommit([delhiRow], "delhi_upload.csv", "delhi_team", store, false);
 
     // 2. Upload Kolkata row with same PO number
-    await localCommit([kolkataRow], "kolkata_upload.csv", "kolkata_team", store);
+    await localCommit([kolkataRow], "kolkata_upload.csv", "kolkata_team", store, false);
 
     // 3. Assert both headers exist independently in the store
     expect(store.po_header).toHaveLength(2);
@@ -333,7 +352,7 @@ describe("Phase 1 Data Layer Integrity Suite", () => {
         total_amount: 6000,
         po_state: "Confirmed",
       };
-      await localCommit([updatedDelhiRow], "delhi_reupload.csv", "delhi_team", store);
+      await localCommit([updatedDelhiRow], "delhi_reupload.csv", "delhi_team", store, false);
 
       // 7. Verify Delhi PO was updated
       const delhiHeaderAfter = store.po_header.find((h: any) => h.hub === "delhi");

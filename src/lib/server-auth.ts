@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { UserRole } from "./types";
+import { getAdminSupabaseClient, getOrCreateRole } from "./admin-auth";
 
 export interface AuthContext {
   userId: string;
@@ -18,9 +19,9 @@ export interface AuthContext {
 export async function authenticateApiRequest(
   req: NextRequest
 ): Promise<NextResponse | AuthContext> {
-  // Check header-based or cookie-based mock/test role for isolated unit testing
+  // Check header-based or cookie-based test role for isolated unit testing
   const testRole = req.headers.get("x-test-role") as UserRole | null;
-  if (testRole) {
+  if (testRole && process.env.NODE_ENV !== "production") {
     if (testRole === "pending") {
       return NextResponse.json(
         { error: "Forbidden: Account pending approval" },
@@ -36,9 +37,9 @@ export async function authenticateApiRequest(
   const isConfigured =
     supabaseUrl &&
     supabaseAnonKey &&
-    !supabaseUrl.includes("mock.supabase.co") &&
+    !supabaseUrl.includes("supabase.invalid") &&
     !supabaseUrl.includes("your-project") &&
-    !supabaseAnonKey.includes("mock-") &&
+    !supabaseAnonKey.includes("invalid-") &&
     !supabaseAnonKey.includes("your-");
 
   if (!isConfigured) {
@@ -69,13 +70,13 @@ export async function authenticateApiRequest(
     );
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("user_id", user.id)
-    .single();
-
-  const role = profile?.role;
+  const admin = getAdminSupabaseClient();
+  if (!admin) return NextResponse.json({ error: "Database service is not configured" }, { status: 503 });
+  let lookup;
+  try { lookup = await getOrCreateRole(admin, user); }
+  catch { return NextResponse.json({ error: "Unable to read account role" }, { status: 503 }); }
+  if (lookup.databaseNotReady) return NextResponse.json({ error: "The database is not set up yet. Ask an administrator to run the migrations" }, { status: 503 });
+  const role = lookup.role;
 
   if (role === "pending") {
     return NextResponse.json(

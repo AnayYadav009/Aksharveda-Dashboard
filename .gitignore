@@ -24,13 +24,11 @@ test-results/
 playwright-report/
 blob-report/
 
-# Environment Variables & Secrets (Keep .env.example tracked)
+# Environment Variables & Secrets (keep local files untracked)
 .env*
-!.env.example
 
 # Local Data Store
 .data/
-/.data/
 
 # Python Virtual Environments & Cache
 .venv/

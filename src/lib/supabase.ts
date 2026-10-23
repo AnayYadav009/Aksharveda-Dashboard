@@ -19,22 +19,22 @@ export function getSupabaseCredentials() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
   // Strictly require service role key for backend operations - no silent fallback to anon key
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!key && url && !url.includes("mock.supabase.co")) {
+  if (!key && url && !url.includes("supabase.invalid")) {
     console.error("FATAL: SUPABASE_SERVICE_ROLE_KEY is not defined. Failing loudly to prevent unauthorized or silent fallback operations.");
   }
   return { url, key };
 }
 
 /**
- * Returns true if valid, non-mock Supabase credentials are configured.
+ * Returns true if usable Supabase credentials are configured.
  */
 export function isSupabaseConfigured(): boolean {
   const { url, key } = getSupabaseCredentials();
   if (!url || !key) return false;
-  if (url.includes("mock.supabase.co") || url.includes("your-project")) {
+  if (url.includes("supabase.invalid") || url.includes("your-project")) {
     return false;
   }
-  if (key.includes("mock-") || key.includes("your-")) {
+  if (key.includes("invalid-") || key.includes("your-")) {
     return false;
   }
   return true;

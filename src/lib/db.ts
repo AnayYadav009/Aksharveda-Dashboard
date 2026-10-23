@@ -12,6 +12,7 @@ import {
   InAppNotification,
   UploadPreview,
   RejectedRow,
+  Hub,
 } from "./types";
 import { calculateDaysToExpiry } from "./parser";
 import { getSupabaseClient, isSupabaseConfigured } from "./supabase";
@@ -91,10 +92,20 @@ export function saveStore(store: DatabaseStore): void {
 /**
  * Loads data from Supabase if configured, falling back to local JSON store.
  */
-export async function getUnifiedStore(): Promise<DatabaseStore> {
+export async function getUnifiedStore(hub: Hub): Promise<DatabaseStore> {
   const supabase = getSupabaseClient();
   if (!supabase) {
-    return loadStore();
+    const store = loadStore();
+    return {
+      ...store,
+      po_header: store.po_header.filter((row) => row.hub === hub),
+      po_line: store.po_line.filter((row) => row.hub === hub),
+      po_plan: store.po_plan.filter((row) => row.hub === hub),
+      po_line_dispatch: store.po_line_dispatch.filter((row) => row.hub === hub),
+      stock_snapshot: store.stock_snapshot.filter((row) => row.hub === hub),
+      po_state_history: store.po_state_history.filter((row) => row.hub === hub),
+      upload_log: store.upload_log.filter((row) => row.hub === hub),
+    };
   }
 
   try {
@@ -112,14 +123,14 @@ export async function getUnifiedStore(): Promise<DatabaseStore> {
       notifsRes,
     ] = await Promise.all([
       supabase.from("channels").select("*"),
-      supabase.from("po_header").select("*"),
-      supabase.from("po_line").select("*"),
+      supabase.from("po_header").select("*").eq("hub", hub),
+      supabase.from("po_line").select("*").eq("hub", hub),
       supabase.from("sku_master").select("*"),
-      supabase.from("po_plan").select("*"),
-      supabase.from("po_line_dispatch").select("*"),
-      supabase.from("stock_snapshot").select("*"),
-      supabase.from("po_state_history").select("*"),
-      supabase.from("upload_log").select("*").order("uploaded_at", { ascending: false }),
+      supabase.from("po_plan").select("*").eq("hub", hub),
+      supabase.from("po_line_dispatch").select("*").eq("hub", hub),
+      supabase.from("stock_snapshot").select("*").eq("hub", hub),
+      supabase.from("po_state_history").select("*").eq("hub", hub),
+      supabase.from("upload_log").select("*").eq("hub", hub).order("uploaded_at", { ascending: false }),
       supabase.from("notification_recipients").select("*"),
       supabase.from("in_app_notifications").select("*").order("created_at", { ascending: false }),
     ]);

@@ -23,12 +23,15 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(validRows) || validRows.length === 0) {
       return NextResponse.json({ error: "No valid rows provided for commit" }, { status: 400 });
     }
+    if (validRows.some((row: unknown) => !row || typeof row !== "object" || (row as CleanedBlinkitRow).hub !== hubResult.data)) {
+      return NextResponse.json({ error: "Every uploaded row must match the selected hub" }, { status: 400 });
+    }
 
     const { uploadId, preview } = await commitUploadTransaction(
       validRows as CleanedBlinkitRow[],
       fileName || "upload.csv",
       uploadedBy || "demand_team",
-      Boolean(forceErrorAfterHeader),
+      process.env.NODE_ENV !== "production" && Boolean(forceErrorAfterHeader),
       Array.isArray(rejectedRows) ? rejectedRows : []
     );
 
@@ -40,7 +43,7 @@ export async function POST(req: NextRequest) {
       // Find the new PO headers from validRows
       const existingPoNumbers = new Set(
         store.po_header
-          .filter((h) => h.first_upload_id !== uploadId)
+        .filter((h) => h.first_upload_id !== uploadId && h.channel_id === 'blinkit' && h.hub === hubResult.data)
           .map((h) => h.po_number)
       );
       const newRows = (validRows as CleanedBlinkitRow[]).filter((r) => !existingPoNumbers.has(r.po_number));
